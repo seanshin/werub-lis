@@ -1,0 +1,261 @@
+@import "tailwindcss";
+
+/* ============================================================================
+   LIS 디자인 토큰 — "임상 정밀(Clinical Precision)" (2026-07-29 개편)
+   ----------------------------------------------------------------------------
+   지향: 전문 의료 장비의 계기판. 장식이 아니라 판독을 돕는 화면.
+     · 중성 회색 기반 + 강조색 극소량 → 위험색(crit)이 진짜로 눈에 띈다
+     · 구획은 그림자가 아니라 1px 라인 — 카드가 떠 있지 않고 정렬돼 보인다
+     · 거의 직각(4~6px) — 둥근 카드 격자 인상을 제거
+     · 숫자는 tabular — 표에서 자릿수가 세로로 맞는다
+
+   ★대비는 손으로 재지 않는다. `infra/scripts/check-contrast.mjs`가 CI에서
+     라이트/다크 × 전경×배경 전 조합을 실측한다(기준 4.5:1). 토큰을 고치면
+     그 게이트가 막는다 — 과거 라이트 warn이 2.96:1로 새어 11px 배지가
+     판독 불가였던 일을 사람 기억에 다시 맡기지 않기 위한 것.
+
+   ★색 역할(임상 안전 직결 · 회귀 금지)
+     crit 채움 = 환자에게 즉시 위험한 임상 행위에만(수혈 출고·제제 회수·
+     병리 중요진단 통보 등 9곳). 파괴적이나 환자 위험 아님 = crit 외곽선,
+     업무 이상 = warn, 주 동작 = accent. 위험 색이 흔해지면 진짜 위험치가 묻힌다.
+   ============================================================================ */
+@theme {
+  /* 배경·표면 — 청록 틴트를 걷어내고 순수 중성으로 */
+  --color-bg: #f6f7f8;
+  --color-surface: #ffffff;
+  --color-surface-2: #f1f3f5;
+  --color-line: #dfe3e8;
+  /* 잉크 3단 */
+  --color-ink: #14181c;
+  --color-ink-2: #495159;
+  --color-ink-3: #5f6b75;
+  /* 강조 — 단일 슬레이트 블루. 이름(teal)은 사용처 400여 곳 호환 위해 유지한다. */
+  --color-teal: #1b4fd8;
+  --color-teal-2: #163fae;
+  --color-indigo: #5b3fd0;   /* 보조 강조(계보·참고 표시 등) */
+  /* 상태 */
+  --color-good: #04703f;
+  --color-warn: #8a5a00;
+  --color-crit: #b3271b;
+
+  /* 채움 위 흰 글자용 — 라이트에선 상태색과 동일(이미 4.5 이상). 다크에서만 갈라진다. */
+  --color-teal-fill: #1b4fd8;
+  --color-good-fill: #04703f;
+  --color-warn-fill: #8a5a00;
+  --color-crit-fill: #b3271b;
+  --color-indigo-fill: #5b3fd0;
+
+  /* 모서리 — Tailwind 기본(rounded-lg=8px)을 낮춰 406곳을 파일 수정 없이 정렬한다 */
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
+  --radius-2xl: 6px;
+}
+
+/* 다크 — OS 선호 + 토글 양방향. 값이 한 벌뿐이도록 커스텀 속성으로 묶는다. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --lis-dark: 1; }
+}
+:root[data-theme="dark"] { --lis-dark: 1; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-bg: #0d1013;
+    --color-surface: #16191d;
+    --color-surface-2: #1d2227;
+    --color-line: #2b3138;
+    --color-ink: #e8eaed;
+    --color-ink-2: #a6aeb7;
+    --color-ink-3: #939ca6;
+    --color-teal: #6f9bff;
+    --color-indigo: #a894ff;
+    --color-good: #45c98a;
+    --color-warn: #d9a441;
+    --color-crit: #f2796c;
+    /* ★다크에서는 텍스트색과 채움색이 갈라진다 — 밝은 색 위 흰 글자는 2.4~3.0:1로
+       판독이 안 된다(자동 게이트가 잡아낸 기존 결함). 채움은 어둡게 유지한다. */
+    --color-teal-fill: #1a44b8;
+    --color-good-fill: #0a5c38;
+    --color-warn-fill: #6f4700;
+    --color-crit-fill: #962016;
+    --color-indigo-fill: #4a32ad;
+  }
+}
+:root[data-theme="dark"] {
+  --color-bg: #0d1013;
+  --color-surface: #16191d;
+  --color-surface-2: #1d2227;
+  --color-line: #2b3138;
+  --color-ink: #e8eaed;
+  --color-ink-2: #a6aeb7;
+  --color-ink-3: #939ca6;
+  --color-teal: #6f9bff;
+  --color-indigo: #a894ff;
+  --color-good: #45c98a;
+  --color-warn: #d9a441;
+  --color-crit: #f2796c;
+  --color-teal-fill: #1a44b8;
+  --color-good-fill: #0a5c38;
+  --color-warn-fill: #6f4700;
+  --color-crit-fill: #962016;
+  --color-indigo-fill: #4a32ad;
+}
+
+/* 채움 유틸만 fill 토큰으로 재지정 — `text-crit`(밝게)와 `bg-crit`(어둡게)를
+   같은 이름으로 쓰면서 갈라놓는다. 168곳의 `bg-* text-white` 조합을 손대지 않는다. */
+.bg-teal   { background-color: var(--color-teal-fill); }
+.bg-good   { background-color: var(--color-good-fill); }
+.bg-warn   { background-color: var(--color-warn-fill); }
+.bg-crit   { background-color: var(--color-crit-fill); }
+.bg-indigo { background-color: var(--color-indigo-fill); }
+
+/* ── 서체 ────────────────────────────────────────────────────────────────────
+   Pretendard 자체 호스팅(OFL-1.1). CDN을 쓰지 않는 이유는 병원 내부망이 외부
+   인터넷을 막는 경우가 많아서다 — 그러면 폰트가 조용히 실패하고 맑은 고딕으로
+   떨어져, 개발 화면과 현장 화면의 인상이 달라진다. 상세 public/fonts/README.txt.
+   가변 폰트라 파일 하나로 굵기 전 구간을 덮는다. */
+@font-face {
+  font-family: 'Pretendard';
+  src: url('/fonts/PretendardVariable.woff2') format('woff2-variations');
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;   /* 폰트 대기 중에도 글자는 보인다(임상 화면은 공백이 위험) */
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: 'Pretendard', system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  /* 숫자를 표 전체에서 세로 정렬 — 검사값·수량이 자릿수로 읽힌다 */
+  font-variant-numeric: tabular-nums;
+}
+.mono {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+   타이포 스케일(UX 기획 §1-1) — 임의 크기(text-[10px] 등) 대신 의미 단위 5종.
+   같은 위계가 화면마다 다른 크기로 보이던 것을 수렴시킨다.
+   ============================================================ */
+.t-page    { font-size: 20px;   line-height: 1.35; font-weight: 700; letter-spacing: -0.01em; }
+.t-section { font-size: 15px;   line-height: 1.4;  font-weight: 700; }
+.t-body    { font-size: 14px;   line-height: 1.55; }
+.t-meta    { font-size: 12.5px; line-height: 1.5;  color: var(--color-ink-2); }
+.t-micro   { font-size: 11px;   line-height: 1.45; font-weight: 600; color: var(--color-ink-3); }
+
+/* 시각 언어 — radius 3단 / elevation 3단.
+   ★구획은 그림자가 아니라 1px 라인으로 한다. border+shadow+큰 radius를 동시에 쓰면
+     카드가 배경 위에 떠 보이고, 화면이 '카드 격자'로 읽힌다. 정보 밀도가 높은 검사
+     화면에서는 떠 있는 것보다 **정렬된 것**이 스캔하기 쉽다. 그림자는 실제로 위에
+     겹치는 것(모달·팝오버)에만 남긴다. */
+.r-chip { border-radius: 3px; }
+.r-ctl  { border-radius: 4px; }
+.r-card { border-radius: 6px; }
+.e-flat    { box-shadow: none; }
+.e-raised  { box-shadow: none; }                          /* 라인으로 대체 */
+.e-overlay { box-shadow: 0 10px 30px rgb(0 0 0 / 0.18); } /* 겹침 요소만 */
+
+/* 섹션 카드 정본 — 73곳에 복제돼 있던 조합을 한 곳으로.
+   카드 스타일을 바꿀 때 여기만 고치면 된다. */
+.card { background: var(--color-surface); border: 1px solid var(--color-line); border-radius: 6px; padding: 18px; }
+:root[data-density="compact"] .card { padding: 12px; }
+
+/* 표 — 판독 밀도를 위한 기본기. 검사실 화면의 본체는 표다.
+   제목행은 스크롤해도 남아야 어느 열을 보는지 잃지 않는다. */
+thead th {
+  font-size: 11.5px; font-weight: 700; letter-spacing: 0.02em;
+  color: var(--color-ink-3); text-transform: none;
+  border-bottom: 1px solid var(--color-line);
+}
+tbody tr { border-bottom: 1px solid color-mix(in srgb, var(--color-line) 60%, transparent); }
+tbody tr:last-child { border-bottom: 0; }
+/* 표 안의 숫자·코드는 자릿수 정렬 */
+td.mono, th.mono, td .mono { font-variant-numeric: tabular-nums; }
+
+/* 모션(§1-5) — 최소·기능적. 위험 요소는 깜빡이지 않는다(경보 피로·발작 위험). */
+.m-hover   { transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out; }
+.m-pop     { animation: pop-in 140ms ease-out; }
+.m-flash   { animation: row-flash 600ms ease-out; }
+@keyframes pop-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes row-flash { from { background-color: color-mix(in srgb, var(--color-warn) 12%, transparent); } to { background-color: transparent; } }
+/* 스켈레톤 — 스피너보다 레이아웃 이동이 적다 */
+.skeleton { background: linear-gradient(90deg, var(--color-surface-2) 25%, var(--color-line) 37%, var(--color-surface-2) 63%); background-size: 400% 100%; animation: shimmer 1.2s ease-in-out infinite; }
+@keyframes shimmer { from { background-position: 100% 50%; } to { background-position: 0 50%; } }
+
+/* ============================================================
+   페이지 폭 정책(§1-4 보강) — 화면마다 max-w가 3xl~6xl로 제각각이라 넓은 모니터에서
+   좌우 여백이 과하게 남았다. 두 가지로만 나눈다.
+   ① .page     작업형(목록·워크리스트·대시보드·표) — 화면을 최대한 쓰되 1760px 상한.
+                무한정 넓히면 표 셀이 늘어져 시선 이동이 길어지고 오독이 는다.
+   ② .page-doc 문서형(보고서·도움말·용어집) — 읽기 최적 줄길이(약 90자) 유지.
+   ============================================================ */
+.page     { width: 100%; max-width: 1760px; margin: 0 auto; padding: 24px; }
+.page-doc { width: 100%; max-width: 980px;  margin: 0 auto; padding: 24px; }
+@media (max-width: 768px) { .page, .page-doc { padding: 16px; } }
+
+/* 태블릿 세로 최적화(§4) — 검사실 현장은 태블릿 세로를 쓴다.
+   표가 가로 스크롤에 의존하면 스캔·입력 중 좌우로 밀려 오조작이 생긴다.
+   좁은 폭에서는 셀 여백·글자를 살짝 줄여 한 화면에 더 들어오게 한다(글자 크기 하한 유지). */
+@media (min-width: 640px) and (max-width: 1024px) {
+  table { font-size: 13px; }
+  th, td { padding-left: 6px; padding-right: 6px; }
+  .card { padding: 16px; }
+}
+
+/* 밀도 모드(§1-7) — 조밀에서 표 행 여백만 축소. 글자 크기는 건드리지 않는다(가독성 유지). */
+:root[data-density="compact"] td,
+:root[data-density="compact"] th { padding-top: 3px; padding-bottom: 3px; }
+:root[data-density="compact"] .r-card { padding: 14px; }
+
+/* 접근성 — 키보드 포커스 링(마우스 클릭엔 미표시) */
+:focus-visible {
+  outline: 2px solid var(--color-teal);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* 스킵 링크 */
+.skip-link {
+  position: absolute; left: -999px; top: 0; z-index: 100;
+  background: var(--color-teal); color: #fff; padding: 8px 12px; border-radius: 0 0 8px 0;
+}
+.skip-link:focus { left: 0; }
+
+/* 모션 축소 선호 존중 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* 인쇄(결과보고서·라벨) — 인쇄 영역(.print-area)만 단독 출력, 나머지(사이드바·목록·폼) 숨김 */
+.print-only { display: none; }
+@media print {
+  .no-print, .no-print * { display: none !important; }
+  .print-only { display: block !important; }
+  /* 인쇄 시 설명 밑줄 제거 — 종이에는 팝오버가 없으므로 장식만 남는다 */
+  .print-area .underline { text-decoration: none !important; }
+  /* 전체 숨기고 인쇄 영역만 보이기 — 라벨은 해당 라벨만, 보고서는 해당 보고서만 인쇄 */
+  body * { visibility: hidden; }
+  .print-area, .print-area * { visibility: visible; }
+  .print-area { position: absolute; left: 0; top: 0; margin: 0; padding: 0; box-shadow: none !important; border: none !important; }
+  body { background: #fff !important; }
+  @page { margin: 12mm; }
+  /* 인쇄 품질(§3-5) — 표가 페이지 경계에서 잘리지 않게, 헤더는 페이지마다 반복 */
+  .print-area table { page-break-inside: auto; }
+  .print-area tr { page-break-inside: avoid; page-break-after: auto; }
+  .print-area thead { display: table-header-group; }
+  .print-area h1, .print-area h2 { page-break-after: avoid; }
+  /* 인쇄에서는 배경색이 빠지는 프린터가 있다 — 위험 표시는 굵기·기호로도 남는다(§1-6) */
+  .print-area .t-micro { font-weight: 700; }
+}
+
+/* 카드 리듬 — 세로로 쌓인 카드 간격을 한 곳에서 정한다.
+   화면마다 mb-3/mb-4가 섞여 리듬이 어긋나던 것을 수렴시킨다(개별 mb는 그대로 두되,
+   인접 카드에는 최소 간격을 보장). */
+.card + .card { margin-top: 12px; }
+
+/* 마이크로 텍스트 하한 — 임상 화면에서 9~10px 배지는 판독 부담이 크다.
+   임의 크기를 11px로 올려 통일했고(102곳), 그보다 작아지지 않도록 못을 박는다. */
+.t-micro, .text-\[11px\] { font-size: 11px; }

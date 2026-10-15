@@ -1,0 +1,1825 @@
+// LIS(검사정보시스템) Prisma 스키마
+// 근거: 06_상세설계_데이터모델.md, dev/schema.sql (SQLite 검증 완료)
+// 규약(HIS 준거): snake_case DB 컬럼(@map), PostgreSQL 16
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// Enums
+// ============================================================
+enum Domain {
+  DIAGNOSTIC // 진단검사의학
+  MICROBIOLOGY // 미생물
+  PATHOLOGY // 병리
+  TRANSFUSION // 수혈
+  GENOMIC // 유전체
+}
+
+enum Sex {
+  M
+  F
+  O
+  U
+}
+
+enum Priority {
+  S // STAT(응급)
+  R // Routine
+}
+
+enum OrderStatus {
+  RECEIVED
+  IN_PROCESS
+  COMPLETED
+  REPORTED
+  CANCELLED
+  HOLD
+}
+
+enum SpecimenStatus {
+  COLLECTED
+  RECEIVED
+  IN_PROCESS
+  COMPLETED
+  REJECTED
+  STORED
+  DISPOSED
+}
+
+enum ResultStatus {
+  P // 예비(Preliminary)
+  F // 최종(Final)
+  C // 정정(Corrected)
+}
+
+enum ResultFlag {
+  N
+  H
+  L
+  HH
+  LL
+}
+
+enum VerifyState {
+  PENDING // 검증대기(수동)
+  AUTO // 자동검증 통과
+  VERIFIED // 2차 검증 확정
+}
+
+enum GenomicTestType {
+  SOMATIC // 체세포
+  GERMLINE // 생식세포
+  INFECTION // 감염체
+  PGX // 약유전체
+}
+
+// ============================================================
+// 마스터
+// ============================================================
+model Provider {
+  providerId String @id @map("provider_id")
+  name       String
+  dept       String?
+  roleType   String? @map("role_type")
+
+  visits     Visit[]
+  orders     LabOrder[]
+  pathReports PathologyReport[]
+  users      AppUser[]
+
+  @@map("provider")
+}
+
+model Container {
+  containerCode String  @id @map("container_code")
+  name          String
+  additive      String?
+  color         String?
+
+  specimens Specimen[]
+  aliquots  Aliquot[]
+
+  @@map("container")
+}
+
+model TestMaster {
+  testCode     String  @id @map("test_code")
+  name         String
+  loinc        String?
+  domain       Domain
+  unitUcum     String? @map("unit_ucum")
+  specimenType String? @map("specimen_type")
+  status       String  @default("USE")
+  // B5 검사별 자동검증·델타 설정(전역 하드코딩 대체) — 미설정 시 안전 기본값
+  autoVerify      Boolean @default(true) @map("auto_verify") // false면 이 검사는 항상 수동검증
+  deltaPctLimit   Float?  @map("delta_pct_limit") // 델타 %한계(미설정=50)
+  deltaAbsLimit   Float?  @map("delta_abs_limit") // 델타 절대값 한계(OR 적용)
+  deltaWindowDays Int?    @map("delta_window_days") // 델타 look-back 창(일) — 이 기간 내 직전값만 비교
+
+  panelItems      PanelItem[]
+  referenceRanges ReferenceRange[]
+  orderItems      OrderItem[]
+  results         Result[]
+  qcResults       QcResult[]
+  codeMapping     CodeMapping?
+
+  @@map("test_master")
+}
+
+model Panel {
+  panelCode String @id @map("panel_code")
+  name      String
+
+  items PanelItem[]
+
+  @@map("panel")
+}
+
+model PanelItem {
+  panelCode String @map("panel_code")
+  testCode  String @map("test_code")
+
+  panel Panel      @relation(fields: [panelCode], references: [panelCode])
+  test  TestMaster @relation(fields: [testCode], references: [testCode])
+
+  @@id([panelCode, testCode])
+  @@map("panel_item")
+}
+
+model ReferenceRange {
+  rrId      String  @id @map("rr_id")
+  testCode  String  @map("test_code")
+  sex       String  @default("A") // A/M/F
+  ageMin    Int     @default(0) @map("age_min")
+  ageMax    Int     @default(200) @map("age_max")
+  low       Float?
+  high      Float?
+  panicLow  Float?  @map("panic_low")
+  panicHigh Float?  @map("panic_high")
+
+  test TestMaster @relation(fields: [testCode], references: [testCode])
+
+  @@index([testCode])
+  @@map("reference_range")
+}
+
+model CodeMapping {
+  lisCode String @id @map("lis_code")
+  hisCode String? @map("his_code")
+  loinc   String?
+  ediCode String? @map("edi_code")
+  status  String @default("USE")
+
+  test TestMaster @relation(fields: [lisCode], references: [testCode])
+
+  @@index([hisCode])
+  @@index([ediCode])
+  @@map("code_mapping")
+}
+
+// 진단·SNOMED 등 용어 코드 마스터 — 병리 판독 진단/SNOMED 검색·등록 공용.
+// (전체 SNOMED-CT는 라이선스·대용량 → 부서가 실사용 코드를 큐레이션·bulk import)
+model TerminologyCode {
+  codeId    String   @id @map("code_id")
+  system    String   @default("SNOMED") // SNOMED / ICD-O / LOCAL
+  code      String // 예: M-80703(편평세포암), T-04000(유방)
+  term      String // 대표 용어(영문/표준)
+  termKo    String?  @map("term_ko") // 한글명
+  category  String? // MORPHOLOGY(형태)/TOPOGRAPHY(부위)/DIAGNOSIS(진단)
+  status    String   @default("USE") // USE / STOP
+  createdBy String?  @map("created_by")
+  createdDt DateTime @default(now()) @map("created_dt")
+
+  @@unique([system, code])
+  @@index([status])
+  @@index([category])
+  @@map("terminology_code")
+}
+
+model Role {
+  roleCode String @id @map("role_code")
+  name     String
+
+  userRoles UserRole[]
+
+  @@map("role")
+}
+
+model AppUser {
+  userId         String    @id @map("user_id")
+  name           String
+  dept           String?
+  status         String    @default("ACTIVE")
+  passwordHash   String?   @map("password_hash")
+  failedAttempts Int       @default(0) @map("failed_attempts") // 로그인 연속 실패
+  lockedUntil    DateTime? @map("locked_until") // 계정 잠금 해제 시각
+  pwdUpdatedDt   DateTime? @map("pwd_updated_dt") // 최종 비밀번호 변경
+  mustChangePassword Boolean @default(false) @map("must_change_password") // 관리자 발급·재설정 직후 강제 변경
+  // 임상 서명 주체 연결 — 병리 사인아웃 등 Provider(의사 마스터)로 기록되는 서명은
+  // 이 연결을 통해 '로그인 계정 → 판독의'를 서버가 유도한다. 클라이언트가 서명자를
+  // 지정하면 타 판독의 명의의 최종 진단을 만들 수 있어 부인방지가 성립하지 않는다.
+  providerId     String?   @map("provider_id")
+
+  provider       Provider? @relation(fields: [providerId], references: [providerId])
+  roles          UserRole[]
+  verifiedResults Result[]        @relation("Verifier")
+  crossmatches   Crossmatch[]
+  interpretations Interpretation[]
+
+  @@map("app_user")
+}
+
+model UserRole {
+  userId   String @map("user_id")
+  roleCode String @map("role_code")
+
+  user AppUser @relation(fields: [userId], references: [userId])
+  role Role    @relation(fields: [roleCode], references: [roleCode])
+
+  @@id([userId, roleCode])
+  @@map("user_role")
+}
+
+// ============================================================
+// 환자 / 오더 / 검체
+// ============================================================
+model Patient {
+  patientId String   @id @map("patient_id") // = HIS 등록번호
+  name      String
+  sex       Sex?
+  birthDate String?  @map("birth_date")
+  // HIS FHIR Patient uuid(폴링 patientRef에서 저장) — HIS 동의 참조 EP가 uuid만 수용(MRN 500, 2026-07-22 실측).
+  // 폴링 유입 시 채워지며, 미보유 환자는 동의 자동참조 불가(수기 확인 폴백).
+  hisPatientUuid String? @map("his_patient_uuid")
+  status    String   @default("ACTIVE")
+  mergedInto String? @map("merged_into") // 병합 시 정본(target) 환자ID — 구 MRN 조회 시 리다이렉트·인바운드 재라우팅
+
+  visits         Visit[]
+  orders         LabOrder[]
+  pathologyCases PathologyCase[]
+  crossmatches   Crossmatch[]
+  bloodIssues    BloodIssue[]
+
+  @@map("patient")
+}
+
+model Visit {
+  visitId   String  @id @map("visit_id")
+  patientId String  @map("patient_id")
+  type      String? // I/O/E
+  dept      String?
+  ward      String?
+  attending String? @map("attending")
+
+  patient  Patient   @relation(fields: [patientId], references: [patientId])
+  provider Provider? @relation(fields: [attending], references: [providerId])
+  orders   LabOrder[]
+
+  @@index([patientId]) // 환자 상세 include·병합 updateMany — HIS 폴링으로 지속 증가
+  @@map("visit")
+}
+
+model LabOrder {
+  orderId          String      @id @map("order_id")
+  // ⚠ hisOrderNo는 **의도적으로 unique가 아니다** — 검체 반려 시 재채취 오더가 hisOrderNo를
+  //   복제해 재검 결과를 원 HIS 오더로 회신한다(rejectSpecimen). 이중 유입 방지는
+  //   유입 경로(HL7 OML·FHIR 폴링)의 기존재 확인으로 한다.
+  hisOrderNo       String?     @map("his_order_no")
+  patientId        String      @map("patient_id")
+  visitId          String?     @map("visit_id")
+  orderingProvider String?     @map("ordering_provider")
+  orderDt          DateTime?   @map("order_dt")
+  priority         Priority    @default(R)
+  // 오더 기원: HIS(폴링/HL7 유입) · MANUAL(LIS 수기) · DOWNTIME(HIS 단절 중 수기 접수).
+  // DOWNTIME이고 hisOrderNo=null이면 HIS 복구 후 대사 대기(reconcile) 대상.
+  orderSource      String      @default("HIS") @map("order_source")
+  downtimeReason   String?     @map("downtime_reason")
+  reconciledDt     DateTime?   @map("reconciled_dt")
+  status           OrderStatus @default(RECEIVED)
+
+  patient   Patient       @relation(fields: [patientId], references: [patientId])
+  visit     Visit?        @relation(fields: [visitId], references: [visitId])
+  provider  Provider?     @relation(fields: [orderingProvider], references: [providerId])
+  items     OrderItem[]
+  specimens Specimen[]
+  genomic   GenomicOrder?
+
+  @@index([status, orderDt])
+  @@index([hisOrderNo])
+  // patientId: 결과 입력·검증마다 직전값/델타 조회가 order.patientId로 파고든다(최고빈도 경로).
+  // orderDt: 상태 미지정 기본 목록·대시보드의 날짜범위 조회([status,orderDt]는 선도열 불일치).
+  @@index([patientId, orderDt])
+  @@index([orderDt])
+  @@map("lab_order")
+}
+
+model OrderItem {
+  orderItemId String      @id @map("order_item_id")
+  orderId     String      @map("order_id")
+  testCode    String      @map("test_code")
+  status      OrderStatus @default(RECEIVED)
+  sendoutFlag Boolean     @default(false) @map("sendout_flag")
+
+  order LabOrder   @relation(fields: [orderId], references: [orderId])
+  test  TestMaster @relation(fields: [testCode], references: [testCode])
+
+  // 오더당 동일 검사 1항목(중복 수행·중복 청구 원천 차단). 취소 후 재추가는 행 재활성화로 처리(add-on).
+  @@unique([orderId, testCode])
+  @@index([status]) // 대시보드 미완료 카운트 — order_item은 최대급 테이블이라 풀스캔 불가
+  @@map("order_item")
+}
+
+model Specimen {
+  specimenNo    String         @id @map("specimen_no") // 바코드
+  orderId       String         @map("order_id")
+  containerCode String?        @map("container_code")
+  specimenType  String?        @map("specimen_type")
+  collectedDt   DateTime?      @map("collected_dt")
+  collectedBy   String?        @map("collected_by") // 채취자
+  receivedDt    DateTime?      @map("received_dt")
+  rejectReason  String?        @map("reject_reason") // 거부 사유코드: HEMOLYZED/INSUFFICIENT/CLOTTED/CONTAMINATED/OTHER
+  rejectedDt    DateTime?      @map("rejected_dt")
+  status        SpecimenStatus @default(RECEIVED)
+  // D1 검체 품질 HIL 지표(용혈·황달·지질혈) — 등급 NONE/1+/2+/3+. 영향 analyte 간섭 경고 근거.
+  hemolysis     String?        // 용혈
+  icterus       String?        // 황달
+  lipemia       String?        // 지질혈
+
+  order       LabOrder           @relation(fields: [orderId], references: [orderId])
+  container   Container?         @relation(fields: [containerCode], references: [containerCode])
+  aliquots    Aliquot[]
+  results     Result[]
+  cultures    Culture[]
+  attachments ResultAttachment[]
+
+  @@index([orderId])
+  @@map("specimen")
+}
+
+/// 검사결과 첨부 문서(PDF·이미지) — 문서 기반 결과 수집 원칙(수기·문서 경로) 지원.
+/// 비협조 장비의 원본 리포트, 외부검사 결과지, 슬라이드 이미지 등을 검체(specimenNo) 또는
+/// 병리 케이스(spNo)에 첨부. 소유자는 둘 중 하나(nullable, additive 확장).
+model ResultAttachment {
+  attachmentId String   @id @map("attachment_id")
+  specimenNo   String?  @map("specimen_no") // 검체 첨부(nullable) — 미생물 외부 배양·동정 결과지 등
+  spNo         String?  @map("sp_no") // 병리 케이스 첨부(nullable)
+  genomicOrderId String? @map("genomic_order_id") // 유전체 오더 첨부(nullable) — 수탁 PDF 결과지 등
+  reactionId   String?  @map("reaction_id") // 수혈 이상반응 첨부(nullable) — 이상반응 조사서·외부검사 결과지
+  eqaId        String?  @map("eqa_id") // EQA 서베이 첨부(nullable) — 외부 정도관리 성적서
+  reportId     String?  @map("report_id") // 법정감염병 신고 첨부(nullable) — 보건소 신고 서류 스캔/사진(완료 근거)
+  filename     String
+  mimeType     String   @map("mime_type") // application/pdf, image/png, image/jpeg
+  sizeBytes    Int      @map("size_bytes")
+  data         Bytes // 바이너리 원본(bytea)
+  note         String? // 첨부 설명(예: "외부검사 결과지", "원본 장비 리포트")
+  uploadedBy   String?  @map("uploaded_by") // 업로더 userId
+  uploadedDt   DateTime @default(now()) @map("uploaded_dt")
+
+  specimen  Specimen?      @relation(fields: [specimenNo], references: [specimenNo], onDelete: Cascade)
+  pathology PathologyCase? @relation(fields: [spNo], references: [spNo], onDelete: Cascade)
+  genomic   GenomicOrder?  @relation(fields: [genomicOrderId], references: [genomicOrderId], onDelete: Cascade)
+  reaction  TransfusionReaction? @relation(fields: [reactionId], references: [reactionId], onDelete: Cascade)
+  eqa       EqaSurvey?     @relation(fields: [eqaId], references: [surveyId], onDelete: Cascade)
+  report    InfectiousReport? @relation(fields: [reportId], references: [reportId], onDelete: Cascade)
+
+  @@index([specimenNo])
+  @@index([spNo])
+  @@index([genomicOrderId])
+  @@index([reactionId])
+  @@index([eqaId])
+  @@index([reportId])
+  @@map("result_attachment")
+}
+
+model Aliquot {
+  aliquotNo        String  @id @map("aliquot_no")
+  specimenNo       String  @map("specimen_no")
+  containerCode    String? @map("container_code")
+  targetInstrument String? @map("target_instrument")
+
+  specimen  Specimen   @relation(fields: [specimenNo], references: [specimenNo])
+  container Container? @relation(fields: [containerCode], references: [containerCode])
+
+  @@map("aliquot")
+}
+
+model Result {
+  resultId    String       @id @map("result_id")
+  specimenNo  String       @map("specimen_no")
+  testCode    String       @map("test_code")
+  value       String?
+  unit        String?
+  flag        ResultFlag?
+  status      ResultStatus @default(F)
+  verifyState VerifyState  @default(PENDING) @map("verify_state")
+  holdReason  String?      @map("hold_reason") // 보류(수동검증) 사유: CRITICAL/DELTA/QC/INSTRUMENT/NONNUMERIC
+  source      String       @default("MANUAL") // 결과 출처: INSTRUMENT/MANUAL/DOCUMENT
+  enteredBy   String?      @map("entered_by") // 입력자(수기) 또는 장비코드(자동)
+  instrument  String?      // 결과 산출 장비(QC 차단 장비 귀속용). 수기 입력은 null.
+  sourceDocRef String?     @map("source_doc_ref") // 원본문서(장비 출력지·PDF) 참조(수기 경로 추적성)
+  version     Int          @default(1)
+  verifier    String?
+  reportedDt  DateTime?    @map("reported_dt")
+  correctionReason String?  @map("correction_reason") // 정정 사유(감사·CAP 요건)
+  correctedBy      String?  @map("corrected_by") // 정정자(인증 주체)
+  supersedesId     String?  @map("supersedes_id") // 이 결과가 대체한 이전 결과 id(버전 체인)
+  dilutionFactor   Float?   @map("dilution_factor") // 희석배수(재검 시 원값×배수=참값)
+  rerun            Boolean  @default(false) // 재검 여부
+  comment          String?  // 기술 코멘트(검체상태·재검근거 등, 검증자 주석) — CAP 요건
+  interpretation   String?  // 해석 코멘트(결과 임상 해석문) — 보고서 표출
+
+  specimen     Specimen        @relation(fields: [specimenNo], references: [specimenNo])
+  test         TestMaster      @relation(fields: [testCode], references: [testCode])
+  verifierUser AppUser?        @relation("Verifier", fields: [verifier], references: [userId])
+  criticals    CriticalNotify[]
+
+  @@index([specimenNo])
+  @@index([verifyState])
+  @@index([reportedDt])
+  @@index([testCode, reportedDt])
+  @@map("result")
+}
+
+// D5 종양(체세포) NGS Run/QC 파운데이션 — 시퀀싱 런 QC(Q30·커버리지 등). 파이프라인 규격은 대기(stub).
+model NgsRun {
+  runId          String    @id @default(cuid()) @map("run_id")
+  runName        String    @map("run_name")
+  flowcell       String?
+  // 런에 올린 검체 — 없으면 "누구의 런인가"를 알 수 없어 소견을 환자에 연결할 수 없다.
+  // 다검체 런(pooling)이 일반적이라 쉼표구분 목록으로 두되, 대표 검체는 primarySpecimenNo.
+  specimenNos    String?   @map("specimen_nos")
+  primarySpecimenNo String? @map("primary_specimen_no")
+  panelCode      String?   @map("panel_code")
+  status         String    @default("RUNNING") // RUNNING/COMPLETE/FAILED
+  q30            Float? // Q30 %
+  totalReads     Float?    @map("total_reads") // reads 수(BigInt 직렬화 회피 위해 Float)
+  meanCoverage   Float?    @map("mean_coverage")
+  uniformityPct  Float?    @map("uniformity_pct")
+  startedDt      DateTime  @default(now()) @map("started_dt")
+  completedDt    DateTime? @map("completed_dt")
+  note           String?
+
+  findings SomaticFinding[]
+  @@map("ngs_run")
+}
+
+// D5 체세포(somatic) 종양 소견 — 변이/융합/CNV/TMB/MSI를 category로 통합. somatic tier(AMP/ASCO Tier I~IV).
+// 생식세포(germline ACMG) 경로와 분리 — somatic을 SF 이차소견으로 오분류하지 않도록.
+model SomaticFinding {
+  findingId      String  @id @default(cuid()) @map("finding_id")
+  runId          String? @map("run_id")
+  genomicOrderId String? @map("genomic_order_id")
+  category       String // VARIANT/FUSION/CNV/TMB/MSI
+  gene           String?
+  alteration     String? // HGVS·융합파트너·CNV유형·값(예: TMB 12.3 mut/Mb, MSI-H)
+  vaf            Float?
+  tier           String? // TIER_I/TIER_II/TIER_III/TIER_IV (AMP/ASCO/CAP)
+  therapy        String? // 연관 치료·임상시험(있으면)
+  note           String?
+  caseSpNo       String?  @map("case_sp_no") // PP5 병리 케이스 결속(조직 기반 NGS)
+  runQcFlag      String?  @map("run_qc_flag") // 생성 시점 런 QC 경고(FAIL/미달) — 병리 보고서에 QC 주의 표기
+  blockId        String?  @map("block_id") // PP5 검사 블록(FFPE)
+  reportedDt     DateTime @default(now()) @map("reported_dt")
+
+  run NgsRun? @relation(fields: [runId], references: [runId])
+  @@index([runId])
+  @@index([genomicOrderId])
+  @@index([caseSpNo])
+  @@map("somatic_finding")
+}
+
+// D4 분자진단/PCR 결과 파운데이션 — 타깃·Ct·검출유무·정량. assay 카탈로그(패널별 타깃)는 검사실 정의 대기(stub).
+model MolecularResult {
+  molId          String    @id @default(cuid()) @map("mol_id")
+  specimenNo     String    @map("specimen_no")
+  panelCode      String?   @map("panel_code") // 예: RESP-PANEL, GI-PANEL(카탈로그는 검사실 정의)
+  target         String // 검출 타깃(예: SARS-CoV-2, Influenza A, M. tuberculosis)
+  assay          String? // 검사법/키트
+  detection      String // DETECTED/NOT_DETECTED/EQUIVOCAL/INVALID
+  ct             Float? // Ct(threshold cycle)
+  quantValue     String?   @map("quant_value") // 정량값(예: 바이럴로드 IU/mL)
+  quantUnit      String?   @map("quant_unit")
+  interpretation String?
+  reportedBy     String?   @map("reported_by")
+  caseSpNo       String?   @map("case_sp_no") // PP5 병리 케이스 결속(조직 기반 분자검사)
+  blockId        String?   @map("block_id") // PP5 검사 블록(FFPE)
+  reportedDt     DateTime  @default(now()) @map("reported_dt")
+  status         String    @default("FINAL") // PRELIMINARY/FINAL/AMENDED
+
+  @@index([specimenNo])
+  @@index([target, reportedDt])
+  @@index([caseSpNo])
+  @@map("molecular_result")
+}
+
+// 조직 게이트(A-1/A-2/A-3/PACS 컷오버) 결재 추적 — dev 플레이스홀더 seed, 실결재 시 문서번호·결재일·결재자 교체.
+//   ⚠ 기능적 게이트 아님(코드 경로는 env config로 동작) — 개시 준비도 추적·표시용 아티팩트.
+model OrgApproval {
+  approvalId   String   @id @default(cuid()) @map("approval_id")
+  gateCode     String   @unique @map("gate_code") // A-1/A-2/A-3/PACS-CUTOVER
+  title        String
+  owner        String? // 결재 주관 부서
+  scope        String?
+  status       String   @default("PENDING") // PENDING/SUBMITTED/IN_PROGRESS/APPROVED/REJECTED (EAS 결재 lifecycle)
+  source       String?  // 결재 참조 출처: MANUAL(수기)/HIS(자동피드) — 향후 연동 시 구분
+  docNo        String?  @map("doc_no") // 결재 문서번호(실결재 시 기입)
+  approvedDate String?  @map("approved_date")
+  approver     String?
+  approverUserId String? @map("approver_user_id") // 결재자 실 계정(인력변경 감지용)
+  recordedBy   String?  @map("recorded_by") // LIS에서 이 결재를 기입한 인증 계정(서버가 JWT로 결속 — 감사·데모/실 판정 정본)
+  reviewIntervalDays Int? @map("review_interval_days") // 정기 재검토 주기(일, 기본 365)
+  nextReviewDate String? @map("next_review_date") // 다음 재검토 예정일(승인일+주기)
+  needsReview  Boolean  @default(false) @map("needs_review") // 재검토 필요(인력변경 등 이벤트 플래그)
+  reviewReason String?  @map("review_reason") // 재검토 필요 사유
+  note         String?
+  updatedDt    DateTime @default(now()) @updatedAt @map("updated_dt")
+
+  @@map("org_approval")
+}
+
+// 조직 게이트 결재 이력 — 승인·재승인·재검토플래그(인력변경·정기)를 감사 추적.
+model OrgApprovalHistory {
+  historyId    String   @id @default(cuid()) @map("history_id")
+  gateCode     String   @map("gate_code")
+  action       String // APPROVED/RE_APPROVED/FLAGGED_STALE
+  actor        String?
+  docNo        String?  @map("doc_no")
+  approvedDate String?  @map("approved_date")
+  reason       String?
+  createdDt    DateTime @default(now()) @map("created_dt")
+
+  @@index([gateCode])
+  @@map("org_approval_history")
+}
+
+// D3 청구 데이터 파운데이션 — 확정 결과에서 청구 대상(EDI코드×건수) 캡처. 심평원 EDI 파일 생성은 규격 대기(stub).
+model BillingItem {
+  billingId    String   @id @default(cuid()) @map("billing_id")
+  orderId      String   @map("order_id")
+  patientId    String?  @map("patient_id")
+  testCode     String   @map("test_code")
+  ediCode      String?  @map("edi_code") // LIS 내부 참고용 — ERP 송신엔 미포함(ERP가 EDI 매핑 소관)
+  testName     String?  @map("test_name")
+  quantity     Int      @default(1)
+  status       String   @default("CAPTURED") // CAPTURED/CLAIMED/CANCELLED
+  claimBatchId String?  @map("claim_batch_id")
+  capturedDt   DateTime @default(now()) @map("captured_dt")
+  note         String?
+
+  @@unique([orderId, testCode]) // 검사당 1회 청구(멱등)
+  @@index([status, capturedDt])
+  @@map("billing_item")
+}
+
+// ERP 청구 전송 메시지(1메시지=1오더) — LIS→ERP API HMAC 웹훅 송신·상태 추적.
+// claimId = LIS-<orderId>(멱등키·source_ref). 정정 시 revision++(ERP 역분개).
+model BillingClaim {
+  claimId      String    @id @map("claim_id") // = LIS-<orderId>
+  orderId      String    @map("order_id")
+  revision     Int       @default(1)
+  patientId    String?   @map("patient_id") // 현재 chartNo, Phase0 후 patientRef passthrough
+  visitId      String?   @map("visit_id") // 선택(HIS 오더 방문식별자)
+  performedOn  String?   @map("performed_on") // ⚠ 검사 실시일(채취/접수일) — ERP 확정, 보고일 아님
+  itemCount    Int       @default(0) @map("item_count")
+  status       String    @default("PENDING") // PENDING(미전송)/SENT/ACCEPTED/REJECTED
+  rejectReason String?   @map("reject_reason")
+  attempts     Int       @default(0)
+  sentDt       DateTime? @map("sent_dt")
+  ackDt        DateTime? @map("ack_dt")
+  createdDt    DateTime  @default(now()) @map("created_dt")
+  updatedDt    DateTime  @updatedAt @map("updated_dt")
+
+  @@index([status, createdDt])
+  @@index([orderId])
+  @@map("billing_claim")
+}
+
+// C2 외부검사 위탁(send-out) — 일반 검사 외부 위탁검사실 의뢰·결과회신 추적(유전체 외 일반검사).
+model Sendout {
+  sendoutId   String    @id @default(cuid()) @map("sendout_id")
+  specimenNo  String    @map("specimen_no")
+  testCode    String    @map("test_code")
+  testName    String?   @map("test_name")
+  referralLab String    @map("referral_lab") // 위탁검사실(녹십자·씨젠 등)
+  status      String    @default("REQUESTED") // REQUESTED/SENT/RESULTED/CANCELLED
+  requestedBy String?   @map("requested_by")
+  requestedDt DateTime  @default(now()) @map("requested_dt")
+  sentDt      DateTime? @map("sent_dt")
+  resultValue String?   @map("result_value")
+  resultUnit  String?   @map("result_unit")
+  resultedBy  String?   @map("resulted_by")
+  resultedDt  DateTime? @map("resulted_dt")
+  // 회신값으로 만든 환자 결과(Result)의 id. 위탁 회신이 환자 결과·보고서·HIS로
+  // 실제 흘러갔는지 대사하는 연결고리(이게 없으면 Sendout 행에만 갇힌다).
+  resultId    String?   @map("result_id")
+  note        String?
+
+  @@index([status, requestedDt])
+  @@index([specimenNo])
+  @@map("sendout")
+}
+
+// C1 결과 리포트 배포/전달 로그 — 인쇄·포털·의뢰의 전달 추적(누가·언제·어디로).
+model ReportDelivery {
+  deliveryId  String   @id @default(cuid()) @map("delivery_id")
+  specimenNo  String   @map("specimen_no")
+  channel     String // PRINT/PORTAL/PROVIDER/FAX
+  recipient   String?
+  deliveredBy String?  @map("delivered_by")
+  deliveredDt DateTime @default(now()) @map("delivered_dt")
+  note        String?
+
+  @@index([specimenNo])
+  @@map("report_delivery")
+}
+
+model CriticalNotify {
+  notifyId     String    @id @map("notify_id")
+  resultId     String?   @map("result_id") // nullable — 미생물(혈액배양 양성) 등 비-Result 소스 허용
+  category     String? // CHEM(결과) | MICRO(배양) — 소스 구분
+  sourceRef    String?   @map("source_ref") // isolateId/cultureId 등 비-Result 소스 참조
+  specimenNo   String?   @map("specimen_no") // 비정규화(resultId 없을 때 디스패치·조회용)
+  patientId    String?   @map("patient_id")
+  patientName  String?   @map("patient_name")
+  label        String? // 통보 항목(예: 혈액배양 양성, CHE-K)
+  value        String? // 통보 값(예: 균명, 6.8)
+  notifyTarget String?   @map("notify_target")
+  notifyMethod String?   @map("notify_method")
+  notifiedDt   DateTime? @map("notified_dt")
+  dispatchStatus String? @map("dispatch_status") // 실통보 상태: SENT/FAILED/PENDING
+  createdDt    DateTime  @default(now()) @map("created_dt") // 생성시각(에스컬레이션 타이머 기준)
+  escalationLevel Int    @default(0) @map("escalation_level") // 0=담당의, 1=수간호사, 2=당직전문의
+  escalatedDt  DateTime? @map("escalated_dt") // 마지막 상향 시각
+  readbackBy   String?   @map("readback_by") // 통보 수신자(복창 확인자)
+  readbackNote String?   @map("readback_note") // 복창(read-back) 내용 문서화
+  ackDt        DateTime? @map("ack_dt")
+  ackBy        String?   @map("ack_by")
+
+  result Result? @relation(fields: [resultId], references: [resultId])
+
+  // 보존정리 대상이 아니라 영구 누적되는 테이블인데, 미확인(ackDt null) 조회가
+  // 3분/5분 크론 + 전 사용자 네비 배지 폴링으로 가장 잦다.
+  @@index([ackDt, createdDt])
+  @@index([patientId]) // 병합 재귀속 updateMany
+  @@index([resultId])
+  @@map("critical_notify")
+}
+
+// ============================================================
+// 정도관리(QC)
+// ============================================================
+model QcMaterial {
+  qcCode String  @id @map("qc_code")
+  name   String?
+  lot    String?
+  expiry String?
+
+  results QcResult[]
+  targets QcTarget[]
+
+  @@map("qc_material")
+}
+
+// 월간 QC 리뷰 사인오프 — 검사실 인증 요건(감독자 정기 검토·승인)
+model QcReview {
+  reviewId   String   @id @map("review_id")
+  period     String // YYYY-MM
+  scope      String // 대상: testCode 또는 'ALL'
+  instrument String?
+  reviewedBy String   @map("reviewed_by")
+  verdict    String // 승인/보류
+  note       String?
+  reviewedDt DateTime @default(now()) @map("reviewed_dt")
+
+  @@unique([period, scope, instrument])
+  @@index([period])
+  @@map("qc_review")
+}
+
+model QcTarget {
+  qcTargetId String @id @map("qc_target_id")
+  qcCode     String @map("qc_code")
+  instrument String
+  testCode   String @map("test_code")
+  mean       Float
+  sd         Float
+  lot        String @default("DEFAULT") // D1 QC 로트 — 로트별 목표범위(신로트 평행검사로 확립·크로스오버)
+
+  material QcMaterial @relation(fields: [qcCode], references: [qcCode])
+
+  @@unique([qcCode, instrument, testCode, lot])
+  @@map("qc_target")
+}
+
+model QcResult {
+  qcResultId    String    @id @map("qc_result_id")
+  qcCode        String    @map("qc_code")
+  instrument    String?
+  testCode      String    @map("test_code")
+  measuredValue Float?    @map("measured_value")
+  measuredDt    DateTime? @map("measured_dt")
+  verdict       String? // PASS/WARN/FAIL
+  lot           String    @default("DEFAULT") // D1 측정에 사용한 QC 로트
+
+  material QcMaterial @relation(fields: [qcCode], references: [qcCode])
+  test     TestMaster @relation(fields: [testCode], references: [testCode])
+
+  @@index([qcCode, instrument, testCode, measuredDt])
+  @@index([testCode, measuredDt])
+  @@map("qc_result")
+}
+
+// ============================================================
+// 미생물
+// ============================================================
+model Culture {
+  cultureId    String    @id @map("culture_id")
+  specimenNo   String    @map("specimen_no")
+  medium       String?
+  stage        String? // 단계: INOCULATED/GRAM/ID/AST_FINAL
+  status       String?
+  gramStain    String?   @map("gram_stain") // 그람 염색 소견(예비보고)
+  gramDt       DateTime? @map("gram_dt")
+  reportStatus String?   @map("report_status") // PRELIMINARY/FINAL/AMENDED
+  // M1 검체 부적합·반려(오염·부적절 채취·이송지연 등)
+  rejectStatus String?   @map("reject_status") // REJECTED
+  rejectReason String?   @map("reject_reason")
+  rejectedBy   String?   @map("rejected_by")
+  rejectedDt   DateTime? @map("rejected_dt")
+
+  specimen Specimen        @relation(fields: [specimenNo], references: [specimenNo])
+  isolates Isolate[]
+  reports  CultureReport[]
+
+  @@index([specimenNo])
+  @@index([reportStatus])
+  @@map("culture")
+}
+
+// 배양 단계별 보고 이력(그람 예비 → 동정/감수성 최종 → 개정)
+model CultureReport {
+  reportId   String   @id @default(cuid()) @map("report_id")
+  cultureId  String   @map("culture_id")
+  stage      String // GRAM/FINAL/AMENDED
+  status     String // PRELIMINARY/FINAL/AMENDED
+  content    String
+  reporter   String?
+  reportedDt DateTime @default(now()) @map("reported_dt")
+
+  culture Culture @relation(fields: [cultureId], references: [cultureId])
+
+  @@index([cultureId, reportedDt])
+  @@map("culture_report")
+}
+
+model Isolate {
+  isolateId String  @id @map("isolate_id")
+  cultureId String  @map("culture_id")
+  organism  String?
+  snomed    String?
+
+  culture         Culture          @relation(fields: [cultureId], references: [cultureId])
+  susceptibilities Susceptibility[]
+
+  @@index([cultureId])
+  @@map("isolate")
+}
+
+model Susceptibility {
+  susId          String  @id @map("sus_id")
+  isolateId      String  @map("isolate_id")
+  antibiotic     String?
+  mic            String?
+  interpretation String? // S/I/R
+  method         String? // B6 검사법: MIC/DISK/GRADIENT
+  standard       String? // B6 판정기준·버전(CLSI/EUCAST) — 재현·감사
+
+  isolate Isolate @relation(fields: [isolateId], references: [isolateId])
+
+  @@index([isolateId])
+  @@map("susceptibility")
+}
+
+// ============================================================
+// 병리
+// ============================================================
+model PathologyCase {
+  spNo         String    @id @map("sp_no")
+  patientId    String    @map("patient_id")
+  hisOrderNo   String?   @unique @map("his_order_no") // HIS ServiceRequest.id 결속 — HIS 오더당 케이스 1건(이중 유입 DB-레벨 차단)
+  procedureCode String?  @map("procedure_code") // HIS EDI 수가코드(LOINC 미매핑 병리)
+  specimenSite String?   @map("specimen_site")
+  receivedDate String?   @map("received_date")
+  status       String? // 접수/그로싱/포매/판독/완료
+  caseType     String   @default("SURGICAL") @map("case_type") // SURGICAL/CYTOLOGY/FROZEN(PP3)
+  clinicalInfo String?   @map("clinical_info") // 임상 병력·정보(PP1)
+  requestingProvider String? @map("requesting_provider") // 의뢰의(PP1)
+  grossDesc    String?   @map("gross_desc") // 그로싱 육안 소견
+  grossedBy    String?   @map("grossed_by")
+  grossedDt    DateTime? @map("grossed_dt")
+  // PACS 연동 상태(재검토 보완) — MWL 송신·WSI 열람 종단 확인 추적
+  mwlStatus    String?   @map("mwl_status") // SENT/CANCELLED(PACS 워크리스트 등록 상태)
+  mwlSentDt    DateTime? @map("mwl_sent_dt")
+  wsiConfirmedDt DateTime? @map("wsi_confirmed_dt") // WSI viewer-link 열람 정상 확인 시각(③ 종단)
+  wsiConfirmedBy String? @map("wsi_confirmed_by")
+  // 판독의 배정(C)
+  assignedTo   String?   @map("assigned_to") // 배정 판독의(Provider/사용자)
+  assignedDt   DateTime? @map("assigned_dt")
+  // 접수 검체 부적합·반려(E)
+  rejectStatus String?   @map("reject_status") // REJECTED(반려)
+  rejectReason String?   @map("reject_reason")
+  rejectedBy   String?   @map("rejected_by")
+  rejectedDt   DateTime? @map("rejected_dt")
+
+  patient     Patient            @relation(fields: [patientId], references: [patientId])
+  report      PathologyReport?
+  attachments ResultAttachment[]
+  specimens   PathologySpecimen[]
+  ihcResults  IhcResult[]
+  cytology    CytologyReport?
+  stainOrders PathologyStainOrder[]
+  consults    PathologyConsult[]
+
+  @@index([assignedTo])
+  @@map("pathology_case")
+}
+
+// 추가 특수염색/IHC·재검(recut) 오더 추적(B) — 판독의 요청 → 진행 → 완료 폐루프.
+model PathologyStainOrder {
+  orderId     String   @id @default(cuid()) @map("order_id")
+  spNo        String   @map("sp_no")
+  blockId     String?  @map("block_id")
+  orderType   String   @map("order_type") // IHC/SPECIAL/RECUT/DEEPER
+  detail      String? // marker/염색명(예: ER, PAS)
+  status      String   @default("REQUESTED") // REQUESTED/IN_PROGRESS/COMPLETED/CANCELLED
+  requestedBy String?  @map("requested_by")
+  requestedDt DateTime @default(now()) @map("requested_dt")
+  completedBy String?  @map("completed_by")
+  completedDt DateTime? @map("completed_dt")
+  note        String?
+
+  case PathologyCase @relation(fields: [spNo], references: [spNo])
+  @@index([spNo])
+  @@index([status])
+  @@map("pathology_stain_order")
+}
+
+// 내부/외부 컨설테이션·2차 소견(D) — 케이스를 다른 병리의/기관에 자문.
+model PathologyConsult {
+  consultId   String   @id @default(cuid()) @map("consult_id")
+  spNo        String   @map("sp_no")
+  consultType String   @map("consult_type") // INTERNAL/EXTERNAL
+  consultant  String? // 자문 대상(병리의/기관)
+  question    String? // 자문 질의
+  opinion     String? // 회신 소견
+  status      String   @default("REQUESTED") // REQUESTED/RESPONDED
+  requestedBy String?  @map("requested_by")
+  requestedDt DateTime @default(now()) @map("requested_dt")
+  respondedDt DateTime? @map("responded_dt")
+
+  case PathologyCase @relation(fields: [spNo], references: [spNo])
+  @@index([spNo])
+  @@map("pathology_consult")
+}
+
+// 병리 블록(포매) — 검체에서 절취한 조직 블록
+// PP3 세포병리(Cytology) — Pap/FNA/체액, 검체 적정성, Bethesda(TBS) 분류.
+model CytologyReport {
+  cytoId       String   @id @default(cuid()) @map("cyto_id")
+  spNo         String   @unique @map("sp_no")
+  specimenType String   @map("specimen_type") // PAP/FNA/FLUID/URINE 등
+  adequacy     String?  // SATISFACTORY/UNSATISFACTORY
+  adequacyNote String?  @map("adequacy_note")
+  category     String?  // Bethesda: NILM/ASC-US/ASC-H/LSIL/HSIL/AGC/SCC / 일반: 양성/비정형/의심/악성
+  diagnosis    String?
+  signer       String?
+  signedDt     DateTime? @map("signed_dt")
+  status       String   @default("최종") // 예비/최종/개정
+  reportedDt   DateTime @default(now()) @map("reported_dt")
+
+  case PathologyCase @relation(fields: [spNo], references: [spNo])
+  @@map("cytology_report")
+}
+
+// PP2 IHC/특수염색 결과 점수화 — marker별 결과·강도·양성%·score(HER2/Allred/Ki-67 등).
+model IhcResult {
+  ihcId        String   @id @default(cuid()) @map("ihc_id")
+  spNo         String   @map("sp_no")
+  slideId      String?  @map("slide_id") // 판독 슬라이드(있으면)
+  marker       String // ER/PR/HER2/Ki-67/CK7 등
+  result       String?  // POS/NEG/EQUIVOCAL
+  intensity    String?  // 0/1+/2+/3+ (강도)
+  percentPos   Float?   @map("percent_pos") // 양성 세포 %
+  score        String?  // HER2 score·Allred·Ki-67% 등 스코어 문자열
+  interpretation String?
+  reportedBy   String?  @map("reported_by")
+  reportedDt   DateTime @default(now()) @map("reported_dt")
+
+  case PathologyCase @relation(fields: [spNo], references: [spNo])
+  @@index([spNo])
+  @@map("ihc_result")
+}
+
+// PP1 다부위 검체 — 케이스당 검체 part(A/B/C…). 외과병리 다부위 접수.
+model PathologySpecimen {
+  specimenId   String   @id @default(cuid()) @map("specimen_id")
+  spNo         String   @map("sp_no")
+  partLabel    String   @map("part_label") // A/B/C…
+  specimenType String?  @map("specimen_type") // 조직/세포/체액/동결 등
+  site         String? // 채취 부위
+  description  String?
+  createdDt    DateTime @default(now()) @map("created_dt")
+
+  case PathologyCase @relation(fields: [spNo], references: [spNo])
+  @@unique([spNo, partLabel])
+  @@index([spNo])
+  @@map("pathology_specimen")
+}
+
+model PathologyBlock {
+  blockId   String   @id @map("block_id")
+  spNo      String   @map("sp_no")
+  label     String // A/B/1/2...
+  tissue    String?
+  barcode   String?  @unique // PP8 물리 바코드(2D) — 미지정 시 blockId 사용
+  status    String   @default("CREATED") // PP8 CREATED/EMBEDDED/CUT
+  createdDt DateTime @default(now()) @map("created_dt")
+
+  @@index([spNo])
+  @@map("pathology_block")
+}
+
+// 병리 슬라이드 — 블록에서 제작(H&E/특수/면역염색)
+model PathologySlide {
+  slideId     String   @id @map("slide_id")
+  spNo        String   @map("sp_no")
+  blockId     String   @map("block_id")
+  stain       String // HE/SPECIAL/IHC
+  stainDetail String?  @map("stain_detail") // 예: PAS, CK7
+  barcode     String?  @unique // PP8 물리 바코드 — 미지정 시 slideId 사용
+  scanStatus  String   @default("PENDING") @map("scan_status") // PP8 PENDING/SCANNED/FAILED(WSI 스캔)
+  scannedDt   DateTime? @map("scanned_dt")
+  wsiRef      String?  @map("wsi_ref") // PP8 WSI 이미지 참조(경로/Accession)
+  createdDt   DateTime @default(now()) @map("created_dt")
+
+  @@index([spNo])
+  @@index([blockId])
+  @@map("pathology_slide")
+}
+
+// PP8 검체 관리연속성(chain-of-custody) — 블록·슬라이드 바코드 스캔 이벤트 로그.
+model PathologyScanEvent {
+  eventId    String   @id @default(cuid()) @map("event_id")
+  targetType String   @map("target_type") // BLOCK/SLIDE
+  targetId   String   @map("target_id")
+  spNo       String   @map("sp_no")
+  event      String // CREATE/EMBED/CUT/STAIN/SCAN/SCAN_FAIL/DELIVER
+  location   String?
+  scannedBy  String?  @map("scanned_by")
+  scannedDt  DateTime @default(now()) @map("scanned_dt")
+
+  @@index([spNo])
+  @@index([targetType, targetId])
+  @@map("pathology_scan_event")
+}
+
+model PathologyReport {
+  spNo        String  @id @map("sp_no")
+  findings    String?
+  diagnosis   String?
+  snomed      String?
+  status      String? // 예비/최종/개정
+  signer      String?
+  signedDt    DateTime? @map("signed_dt")
+  accessionNo String?   @map("accession_no") // PACS 연계키
+  version     Int       @default(1) // 개정 버전
+  amendReason String?   @map("amend_reason")
+  synoptic    String?   // 구조화 암 보고(synoptic) — 키-값 JSON(종양유형·등급·크기·절제연·림프절·병기 등)
+  synopticProtocol String? @map("synoptic_protocol") // B6 CAP 프로토콜 키(STOMACH/COLON/BREAST 등) — 필수요소 검증 근거
+  // B4 2단계 사인아웃 — 전공의 초안 → 판독전문의 최종
+  draftBy     String?   @map("draft_by") // 전공의(초안 작성)
+  draftDt     DateTime? @map("draft_dt")
+  // B4 동결절편(동결-영구 일치도)
+  frozenDx          String?   @map("frozen_dx") // 동결절편 진단(수술중)
+  frozenBy          String?   @map("frozen_by")
+  frozenDt          DateTime? @map("frozen_dt")
+  frozenConcordance String?   @map("frozen_concordance") // CONCORDANT/DISCORDANT(영구절편 대비)
+  // PP7 구조화 병기(AJCC TNM)·종양분류(ICD-O-3) — 암등록·질병분류 상호운용
+  pT           String?   @map("p_t") // 예: pT3 / ypT2 / cT4a
+  pN           String?   @map("p_n") // 예: pN1a
+  pM           String?   @map("p_m") // 예: M0 / pM1
+  stageGroup   String?   @map("stage_group") // AJCC 병기군(예: IIIA)
+  icdoTopo     String?   @map("icdo_topo") // ICD-O-3 국소부위(예: C16.9)
+  icdoMorph    String?   @map("icdo_morph") // ICD-O-3 형태·행태(예: 8140/3)
+
+  case         PathologyCase @relation(fields: [spNo], references: [spNo])
+  signerProvider Provider?   @relation(fields: [signer], references: [providerId])
+  addenda      PathologyAddendum[]
+
+  @@map("pathology_report")
+}
+
+// B4 추가보고(addendum) — 진단 변경 없이 추후 IHC·분자 결과 등을 덧붙임(개정/amendment와 구분).
+model PathologyAddendum {
+  addendumId String   @id @default(cuid()) @map("addendum_id")
+  spNo       String   @map("sp_no")
+  seq        Int
+  content    String
+  addedBy    String?  @map("added_by")
+  addedDt    DateTime @default(now()) @map("added_dt")
+
+  report PathologyReport @relation(fields: [spNo], references: [spNo])
+
+  // 보고서당 추가보고 seq 유일(동시 등록 경합 시 중복 seq 차단 — 채번은 max+1 재시도)
+  @@unique([spNo, seq])
+  @@map("pathology_addendum")
+}
+
+// ============================================================
+// 수혈
+// ============================================================
+model BloodUnit {
+  unitNo      String  @id @map("unit_no") // ISBT128
+  productType String? @map("product_type")
+  bloodGroup  String? @map("blood_group")
+  drawnDate   String? @map("drawn_date")
+  expiryDate  String? @map("expiry_date")
+  status      String  @default("IN_STOCK")
+  // 특수처리 속성 — 특수요구(방사선조사·CMV음성 등) 출고 게이트 근거(TA-GVHD 방지)
+  irradiated   Boolean @default(false) // 방사선 조사
+  cmvNeg       Boolean @default(false) @map("cmv_neg") // CMV 음성
+  leukoreduced Boolean @default(false) // 백혈구 제거
+  washed       Boolean @default(false) // 세척
+  antigenNeg   String? @map("antigen_neg") // 항원음성 표현형(예: "K-neg, E-neg") — 동종면역 환자 매칭
+  // B2 추적성·회수(hemovigilance) — 헌혈번호로 같은 헌혈 유래 제제 그룹핑, 회수/격리 상태 분리 관리
+  donationId   String? @map("donation_id") // 헌혈번호(혈액원) — look-back 그룹 키
+  recallStatus String? @map("recall_status") // null/QUARANTINED/RECALLED
+  recallReason String? @map("recall_reason")
+  recalledDt   DateTime? @map("recalled_dt")
+  // T2 명시적 폐기(만료·손상·오염 등) — 냉장30분 자동 폐기 외 수동 폐기 사유 추적
+  discardReason String?  @map("discard_reason")
+  discardedBy   String?  @map("discarded_by")
+  discardedDt   DateTime? @map("discarded_dt")
+
+  crossmatches Crossmatch[]
+  issues       BloodIssue[]
+
+  @@index([status, expiryDate])
+  @@index([bloodGroup, status])
+  @@index([donationId])
+  @@map("blood_unit")
+}
+
+// 환자 혈액형·항체선별 검사 결과(수혈 전 필수)
+model BloodTyping {
+  typingId       String   @id @default(cuid()) @map("typing_id")
+  patientId      String   @map("patient_id")
+  abo            String // A/B/O/AB
+  rhD            String   @map("rh_d") // POS/NEG
+  antibodyScreen String   @map("antibody_screen") // NEG/POS
+  antibodyId     String?  @map("antibody_id") // 동정된 항체(있으면)
+  tester         String?
+  testedDt       DateTime @default(now()) @map("tested_dt")
+
+  @@index([patientId, testedDt])
+  @@map("blood_typing")
+}
+
+// 환자별 특수수혈 요구 — 방사선조사(TA-GVHD 예방)·CMV음성 등. 출고 게이트가 서버측에서 강제(요청 누락 무관).
+model PatientTransfusionReq {
+  reqId       String   @id @default(cuid()) @map("req_id")
+  patientId   String   @map("patient_id")
+  requirement String // IRRADIATED/CMV_NEG/LEUKOREDUCED/WASHED
+  reason      String?
+  active      Boolean  @default(true)
+  createdBy   String?  @map("created_by")
+  createdDt   DateTime @default(now()) @map("created_dt")
+
+  @@index([patientId, active])
+  @@map("patient_transfusion_req")
+}
+
+// 수혈 시행 기록
+model TransfusionAct {
+  actId          String    @id @default(cuid()) @map("act_id")
+  issueId        String    @map("issue_id")
+  patientId      String    @map("patient_id")
+  startDt        DateTime  @default(now()) @map("start_dt")
+  endDt          DateTime? @map("end_dt")
+  administeredBy String?   @map("administered_by")
+  status         String    @default("ONGOING") // ONGOING/COMPLETED/STOPPED
+  note           String?
+
+  @@index([issueId])
+  @@map("transfusion_act")
+}
+
+// 수혈 부작용 보고
+model TransfusionReaction {
+  reactionId   String   @id @default(cuid()) @map("reaction_id")
+  issueId      String?  @map("issue_id")
+  patientId    String   @map("patient_id")
+  reactionType String   @map("reaction_type") // FEBRILE/ALLERGIC/HEMOLYTIC/TACO/OTHER
+  severity     String // MILD/MODERATE/SEVERE
+  symptoms     String?
+  action       String? // 조치
+  reportedBy   String?  @map("reported_by")
+  reportedDt   DateTime @default(now()) @map("reported_dt")
+
+  // 조사 워크업(A5) — 보고 후 구조화 조사(사무착오·DAT·post 재검·용혈지표·원인제제·최종분류)
+  investigationStatus String? @default("OPEN") @map("investigation_status") // OPEN/IN_PROGRESS/CLOSED
+  clericalCheckOk     Boolean? @map("clerical_check_ok") // 사무착오 확인(환자·제제 대조)
+  postDat             String? @map("post_dat") // 반응 후 DAT: NEG/POS
+  postAboRecheck      String? @map("post_abo_recheck") // 반응 후 ABO/교차 재검 결과
+  hemolysisVisual     String? @map("hemolysis_visual") // 육안 용혈(혈장/뇨): NONE/PRESENT
+  labFindings         String? @map("lab_findings") // haptoglobin·LDH·bilirubin·DAT 등 요약
+  culpritUnitNo       String? @map("culprit_unit_no") // 원인 의심 제제
+  finalClassification String? @map("final_classification") // AHTR/FNHTR/TRALI/TACO/ALLERGIC/BACTERIAL/NONE
+  conclusion          String? // 최종 결론·권고
+  investigatedBy      String? @map("investigated_by")
+  investigatedDt      DateTime? @map("investigated_dt")
+
+  attachments ResultAttachment[]
+
+  @@index([patientId, reportedDt])
+  @@map("transfusion_reaction")
+}
+
+// 법정감염병·의료관련감염 신고 추적(B3) — 신고 대상 검출 → 신고 완료까지 추적.
+model InfectiousReport {
+  reportId    String    @id @default(cuid()) @map("report_id")
+  isolateId   String?   @map("isolate_id")
+  patientId   String?   @map("patient_id")
+  patientName String?   @map("patient_name")
+  organism    String
+  disease     String
+  grade       String?
+  specimenNo  String?   @map("specimen_no")
+  detectedDt  DateTime  @default(now()) @map("detected_dt")
+  notifiedDt  DateTime? @map("notified_dt")
+  notifiedBy  String?   @map("notified_by")
+  reportNo    String?   @map("report_no") // 보건소 법정감염병 신고번호(접수번호)
+  status      String    @default("PENDING") // PENDING/NOTIFIED
+  note        String?
+
+  attachments ResultAttachment[] // 보건소 신고 서류 스캔/사진(완료 근거)
+
+  @@index([status, detectedDt])
+  @@map("infectious_report")
+}
+
+model Crossmatch {
+  xmId      String   @id @map("xm_id")
+  patientId String   @map("patient_id")
+  unitNo    String   @map("unit_no")
+  method    String?
+  result    String? // 적합/부적합
+  tester    String?
+  testedDt  DateTime @default(now()) @map("tested_dt") // 시간순 "최신 교차시험" 판정 기준(출고 안전)
+
+  patient    Patient   @relation(fields: [patientId], references: [patientId])
+  unit       BloodUnit @relation(fields: [unitNo], references: [unitNo])
+  testerUser AppUser?  @relation(fields: [tester], references: [userId])
+
+  @@map("crossmatch")
+}
+
+model BloodIssue {
+  issueId   String    @id @map("issue_id")
+  unitNo    String    @map("unit_no")
+  patientId String    @map("patient_id")
+  issuer    String?
+  receiver  String?
+  confirm1  String?
+  confirm2  String?
+  issuedDt  DateTime? @map("issued_dt")
+  status       String    @default("ISSUED") // ISSUED/RETURNED(반납)
+  returnReason String?   @map("return_reason")
+  returnedDt   DateTime? @map("returned_dt")
+  // B1 응급(MTP) 출고 — 프로세스 게이트 사후처리
+  emergency    Boolean   @default(false) // 응급 미교차 출고 여부
+  emergencyReason String? @map("emergency_reason")
+  bypassedChecks  String? @map("bypassed_checks") // 응급 시 우회한 프로세스 게이트 기록
+  retroCrossmatchStatus String? @map("retro_crossmatch_status") // 사후 교차확인: PENDING/DONE
+  // T1 수혈 동의 attestation — 동의 정본은 HIS/EMR. 출고 담당자가 HIS 동의서 확인했음을 기록(동의 저장 아님).
+  consentAttestedBy String? @map("consent_attested_by")
+
+  unit    BloodUnit @relation(fields: [unitNo], references: [unitNo])
+  patient Patient   @relation(fields: [patientId], references: [patientId])
+
+  @@map("blood_issue")
+}
+
+// ============================================================
+// 유전체
+// ============================================================
+model GenomicOrder {
+  genomicOrderId String          @id @map("genomic_order_id")
+  orderId        String          @unique @map("order_id")
+  panelCode      String?         @map("panel_code")
+  testType       GenomicTestType @map("test_type")
+  sendoutCenter  String?         @map("sendout_center")
+  tatTarget      String?         @map("tat_target")
+  status         String?
+  // G3 보고서 서명·확정 — 판독 확정 서명(배포는 ReportDelivery 재사용, specimenNo=genomicOrderId)
+  reportStatus   String?         @map("report_status") // 예비/최종/개정
+  reportSignedBy String?         @map("report_signed_by")
+  reportSignedDt DateTime?       @map("report_signed_dt")
+
+  order    LabOrder  @relation(fields: [orderId], references: [orderId])
+  consents Consent[]
+  variants Variant[]
+  attachments ResultAttachment[]
+
+  @@map("genomic_order")
+}
+
+model Consent {
+  consentId               String   @id @map("consent_id")
+  genomicOrderId          String   @map("genomic_order_id")
+  consentType             String?  @map("consent_type")
+  secondaryFindingsOptin  Boolean  @default(false) @map("secondary_findings_optin")
+  signedDate              String?  @map("signed_date")
+  withdrawn               Boolean  @default(false)
+  withdrawnDate           String?  @map("withdrawn_date") // 동의 철회일(환자 권리, 05 §3)
+  withdrawnReason         String?  @map("withdrawn_reason") // 철회 사유
+  withdrawnBy             String?  @map("withdrawn_by") // 철회 처리자
+
+  genomicOrder GenomicOrder @relation(fields: [genomicOrderId], references: [genomicOrderId])
+
+  @@map("consent")
+}
+
+model Variant {
+  variantId      String  @id @map("variant_id")
+  genomicOrderId String  @map("genomic_order_id")
+  chrom          String?
+  pos            Int?
+  refAllele      String? @map("ref_allele")
+  altAllele      String? @map("alt_allele")
+  gene           String?
+  hgvsC          String? @map("hgvs_c")
+  hgvsP          String? @map("hgvs_p")
+  vaf            Float?
+  zygosity       String?
+
+  genomicOrder    GenomicOrder     @relation(fields: [genomicOrderId], references: [genomicOrderId])
+  interpretations Interpretation[]
+
+  @@index([genomicOrderId])
+  @@map("variant")
+}
+
+model Interpretation {
+  interpId       String   @id @map("interp_id")
+  variantId      String   @map("variant_id")
+  classification String? // Pathogenic/Likely Pathogenic/VUS/Likely Benign/Benign
+  evidence       String? // ACMG 근거코드(PVS1,PM2...)
+  classifier     String?
+  classifiedDate String?  @map("classified_date")
+  status         String? // DRAFT/FINAL/SUPERSEDED
+  reason         String? // 재분류 사유
+
+  variant        Variant  @relation(fields: [variantId], references: [variantId])
+  classifierUser AppUser? @relation(fields: [classifier], references: [userId])
+
+  @@map("interpretation")
+}
+
+// ============================================================
+// 연계 (HL7 메시지 로그·멱등)
+// ============================================================
+// 장비 결과코드 → LIS 검사코드 매핑 (자동 인터페이스 경로)
+model InstrumentMapping {
+  id         String @id @default(cuid())
+  instrument String // 장비코드 (예: CHEM1)
+  rawCode    String @map("raw_code") // 장비가 보내는 검사코드 (예: GLU)
+  testCode   String @map("test_code") // LIS 검사코드 (예: CHE-GLU)
+  status     String @default("USE")
+
+  @@unique([instrument, rawCode])
+  @@map("instrument_mapping")
+}
+
+// 외부정도관리(EQA/숙련도시험) — 외부 미지검체 결과·또래군 대비 편차(SDI)
+model EqaSurvey {
+  surveyId       String   @id @default(cuid()) @map("survey_id")
+  program        String // 예: KEQAS
+  cycle          String // 예: 2026-1
+  testCode       String   @map("test_code")
+  sampleId       String   @map("sample_id")
+  submittedValue Float    @map("submitted_value")
+  peerMean       Float?   @map("peer_mean")
+  peerSd         Float?   @map("peer_sd")
+  sdi            Float?
+  verdict        String? // ACCEPT/WARNING/UNACCEPTABLE/PENDING
+  submittedBy    String?  @map("submitted_by")
+  submittedDt    DateTime @default(now()) @map("submitted_dt")
+
+  attachments ResultAttachment[]
+
+  @@index([program, cycle])
+  @@map("eqa_survey")
+}
+
+// 바코드 스캔 설정(싱글톤) — 정규화 규칙 + 스캔 동작. 스캐너 혼재 대응(키보드-웨지 기본).
+// 연동 상태(커서·워터마크) KV — 증분 폴링 _lastUpdated 워터마크 등.
+model IntegrationState {
+  key       String   @id
+  value     String?
+  updatedDt DateTime @updatedAt @map("updated_dt")
+
+  @@map("integration_state")
+}
+
+model BarcodeConfig {
+  id             String   @id @default("SINGLETON")
+  trimWhitespace Boolean  @default(true) @map("trim_whitespace") // 앞뒤 공백 제거
+  prefixStrip    String?  @map("prefix_strip") // 접두 제거(심볼로지 ID 등)
+  suffixStrip    String?  @map("suffix_strip") // 접미 제거
+  stripPattern   String?  @map("strip_pattern") // 정규식으로 제거할 문자(체크섬 등)
+  minLength      Int?     @map("min_length") // 기대 최소 길이(경고)
+  maxLength      Int?     @map("max_length") // 기대 최대 길이(경고)
+  autoSubmit     String   @default("ENTER") @map("auto_submit") // ENTER | LENGTH | IDLE
+  autoSubmitLen  Int?     @map("auto_submit_len") // LENGTH 모드: N자 도달 시 자동 제출
+  idleMs         Int?     @map("idle_ms") // IDLE 모드: 유휴 ms 후 자동 제출
+  beep           Boolean  @default(false) // 스캔 성공 비프
+  updatedBy      String?  @map("updated_by")
+  updatedDt      DateTime @default(now()) @updatedAt @map("updated_dt")
+
+  @@map("barcode_config")
+}
+
+model InterfaceLog {
+  logId            String    @id @default(cuid()) @map("log_id")
+  ifId             String?   @map("if_id") // IF-03 등
+  direction        String // INBOUND/OUTBOUND
+  messageType      String?   @map("message_type")
+  messageControlId String?   @map("message_control_id") // MSH-10 (멱등키)
+  status           String // RECEIVED/PROCESSED/FAILED/STAGED/SENDING/DLQ/APPROVED/REJECTED
+  errorText        String?   @map("error_text")
+  payload          String? // 원문
+  retryCount       Int       @default(0) @map("retry_count") // 발신 재시도 횟수(임계 초과 시 DLQ)
+  hisRef           String?   @map("his_ref") // HIS 반환 PreOrder id(승인상태 폴링·웹훅 매칭 키, errorText와 분리)
+  createdDt        DateTime  @default(now()) @map("created_dt")
+
+  @@unique([direction, messageControlId])
+  @@index([ifId, direction, status, createdDt])
+  @@index([direction, createdDt])
+  @@index([hisRef])
+  @@map("interface_log")
+}
+
+// ============================================================
+// 감사추적 (Audit Trail)
+// ============================================================
+model AuditLog {
+  logId     String   @id @default(cuid()) @map("log_id")
+  userId    String?  @map("user_id")
+  action    String // HTTP 메서드(POST/PATCH/DELETE) 또는 READ(민감)
+  target    String // 라우트/엔터티
+  detail    String? // 요약(파라미터 등)
+  status    Int? // 응답 코드
+  sensitive Boolean  @default(false) // 유전정보 등 민감 접근
+  createdDt DateTime @default(now()) @map("created_dt")
+
+  // Tamper-evident 해시체인(무결성 감사): seq 단조증가, hash = SHA256(정규화 필드 | prevHash).
+  // 레코드 위·변조/재정렬/삭제 시 체인이 깨져 /audit/verify가 탐지. 개시 전 백로그(감사 무결성).
+  seq      Int?    @unique @map("seq") // 체인 시퀀스(단조증가, 감사 무결성 시대)
+  prevHash String? @map("prev_hash") // 직전 레코드 hash(제네시스='0'*64)
+  hash     String? @map("hash") // 이 레코드 hash
+
+  @@index([userId, createdDt])
+  // 조회 화면 기본 필터(사용자 미지정)·기간 요약·보존 퍼지가 전부 createdDt 선도 조건 —
+  // 연 수백만 행 테이블이라 이 인덱스가 없으면 감사 화면이 열릴 때마다 풀스캔+정렬.
+  @@index([createdDt])
+  @@map("audit_log")
+}
+
+// ============================================================
+// 시스템 알림
+// ============================================================
+model Notification {
+  notifyId  String    @id @map("notify_id")
+  ntype     String?
+  target    String?
+  message   String?
+  createdDt DateTime? @map("created_dt")
+  ackDt     DateTime? @map("ack_dt")
+
+  @@index([ackDt, ntype, createdDt])
+  @@map("notification")
+}
+
+// ============================================================
+// Reflex(반사검사) 프로토콜 — 거버넌스 기반 자동오더 규칙 (기획 27)
+//   승인(전문의→위원회→HIS)된 ACTIVE 프로토콜만 엔진이 실행한다.
+// ============================================================
+model ReflexProtocol {
+  protocolId    String    @id @map("protocol_id")
+  name          String
+  version       Int       @default(1)
+  status        String    @default("DRAFT") // DRAFT/PENDING_SPECIALIST/PENDING_COMMITTEE/PENDING_HIS/ACTIVE/REJECTED/SUSPENDED/SUPERSEDED/RETIRED
+  supersedesProtocolId String? @map("supersedes_protocol_id") // 이 프로토콜이 개정하는 선행(계보) — 활성화 시 선행을 SUPERSEDED
+  lineageId     String?   @map("lineage_id") // 계보 뿌리 id(개정본이 승계) — 활성화 시 같은 계보의 다른 활성본 전량 SUPERSEDED
+  whenTestCode  String    @map("when_test_code") // 트리거 검사코드
+  operator      String // >= <= > < OUT_OF_REF FLAG
+  threshold     Float?
+  thresholdHigh Float?    @map("threshold_high")
+  flag          String? // FLAG 연산자용(H/HH/L/LL)
+  addTestCodes  String    @map("add_test_codes") // 콤마구분 후속검사코드
+  priority      String? // 추가오더 우선순위
+  specialistBy  String?   @map("specialist_by") // 전문의 승인자
+  specialistDt  DateTime? @map("specialist_dt")
+  committeeNo   String?   @map("committee_no") // 위원회 의결번호
+  committeeDt   DateTime? @map("committee_dt")
+  hisRef        String?   @map("his_ref") // HIS 등록/수용 참조
+  effectiveFrom String?   @map("effective_from")
+  effectiveTo   String?   @map("effective_to")
+  createdBy     String?   @map("created_by")
+  createdDt     DateTime  @default(now()) @map("created_dt")
+  updatedDt     DateTime  @updatedAt @map("updated_dt")
+
+  events ReflexProtocolEvent[]
+
+  @@index([status])
+  @@index([whenTestCode])
+  @@index([lineageId])
+  @@map("reflex_protocol")
+}
+
+model ReflexProtocolEvent {
+  eventId    String   @id @map("event_id")
+  protocolId String   @map("protocol_id")
+  event      String // CREATE/EDIT/SUBMIT/SPECIALIST_APPROVE/REJECT/COMMITTEE/HIS_SUBMIT/ACTIVATE/SUSPEND/RETIRE
+  actor      String?
+  note       String?
+  createdDt  DateTime @default(now()) @map("created_dt")
+
+  protocol ReflexProtocol @relation(fields: [protocolId], references: [protocolId], onDelete: Cascade)
+
+  @@index([protocolId])
+  @@map("reflex_protocol_event")
+}
+
+/// Reflex 실행 기록 — QI 리포트(프로토콜 성능·의사 반려율 검토)용. applyReflex 발동 시 1건.
+model ReflexExecution {
+  execId       String   @id @map("exec_id")
+  protocolId   String   @map("protocol_id")
+  protocolName String   @map("protocol_name")
+  orderId      String   @map("order_id")
+  addTestCode  String   @map("add_test_code")
+  patientId    String?  @map("patient_id")
+  triggerValue String?  @map("trigger_value") // 트리거 결과값
+  outboundMcid String?  @map("outbound_mcid") // RX-... (interface_log 연계)
+  hisOrderNo   String?  @map("his_order_no") // HIS 승인 시 정식 오더번호(urn:his:order) — 결과 회신 basedOn 결속
+  executedDt   DateTime @default(now()) @map("executed_dt")
+
+  @@index([protocolId])
+  @@index([executedDt])
+  @@index([outboundMcid])
+  @@index([orderId])
+  @@map("reflex_execution")
+}
+
+/**
+ * HIS 검사코드 카탈로그(H1) — HIS `GET /api/v1/integration/lis/lab-codes` 미러.
+ *
+ * ★`CodeMapping`과 분리한 이유: CodeMapping은 PK가 lisCode이고 TestMaster에 FK로 묶인
+ *   **"LIS가 수행하는 검사 ↔ HIS 코드"** 큐레이션 매핑이다. HIS 카탈로그는 약 53,900건이고
+ *   대부분 LIS가 수행하지 않는다. 여기에 넣으면 TestMaster에 53,900건을 만들어야 하고,
+ *   그것은 **LIS가 그 검사를 전부 수행한다는 잘못된 선언**이 되어 코드 해소기가 존재하지 않는
+ *   검사로 오더를 매핑하게 된다. 카탈로그는 참조·대사·매핑 보조 전용이며 오더 해소에 쓰지 않는다.
+ */
+model HisLabCode {
+  code       String   @id // = HIS edi_code(처방코드). ServiceRequest.code와 같은 코드공간
+  nameKo     String?  @map("name_ko")
+  loincCode  String?  @map("loinc_code")
+  category   String?
+  // HIS 결과항목 패널(1:N) 원문 JSON. 운영 초기에는 대부분 비어 있다(HIS 고지).
+  panelJson  String?  @map("panel_json")
+  hisUpdated DateTime? @map("his_updated") // 항목 meta.lastUpdated — 증분(?since=) 커서 산출용
+  syncedDt   DateTime @default(now()) @map("synced_dt")
+
+  @@index([nameKo])
+  @@index([hisUpdated])
+  @@map("his_lab_code")
+}
+
+/**
+ * 운영 설정 — 재기동 없이 화면에서 바꾸는 값(위험치 통보 채널 등).
+ *
+ * 왜 DB로 옮겼나: 위험치 통보 채널이 환경변수 전용이라, 담당 부서가 URL을 주더라도
+ * **서버 파일 수정 + 재기동**이 필요했다. 개시를 막는 유일한 항목이 배포 작업에 묶여 있었다.
+ * 우선순위는 DB > env > 코드 기본값이며, 허용 키는 `settings.catalog.ts` 화이트리스트로 제한한다
+ * (자유 키였다면 관리자 화면이 JWT_SECRET까지 덮어쓰는 통로가 된다).
+ */
+/**
+ * 시드 산출물 등록부 — "이 행은 시드가 만든 것"을 기록한다.
+ *
+ * 왜 필요한가: 파일럿 정리(`pilot-cleanup.sql`)가 **테이블 전량 DELETE**라, 실 환자 데이터가
+ * 이미 들어온 뒤 오실행하면 전량 소실된다. 방어가 스크립트 주석의 경고문뿐이었다.
+ * 시드가 만든 것을 생성 시점에 등록해 두면 **실 데이터는 구조적으로 삭제 대상이 되지 않는다.**
+ *
+ * batch는 4종으로 고정한다(자유 문자열 금지 — 지울 것과 남길 것이 구분되지 않는다):
+ *   product-demo : 제품 데모·교육용(패키지 동봉) → 개시 시 전량 삭제
+ *   site-starter : 사이트 초기 마스터(코드 스타터셋·기본 참고치) → **보존**(서명 실값으로 교체)
+ *   site-pilot   : 현장 파일럿·리허설 산출물 → 개시 시 전량 삭제
+ *   e2e          : 테스트 전용(운영 DB에 있으면 안 된다) → 발견 시 경고
+ *
+ * 근거: docs/개시전환센터_기획서.md §3.5·§6.2c
+ */
+model SeedArtifact {
+  artifactId String   @id @map("artifact_id")
+  batch      String // 위 4종 중 하나
+  entity     String // Prisma 모델 델리게이트명(예: 'patient', 'labOrder')
+  pk         String // 대상 PK. 복합키는 값을 '|'로 이어 붙인다
+  createdDt  DateTime @default(now()) @map("created_dt")
+
+  @@unique([entity, pk, batch])
+  @@index([batch])
+  @@index([entity])
+  @@map("seed_artifact")
+}
+
+/**
+ * 사이트 프로파일 — 이 설치본이 어느 사이트이고 어떤 기능을 쓰는가(1행).
+ *
+ * `capabilities`에 없는 기능의 개시 항목은 **애초에 생성되지 않는다**(NA 처리가 아니다 —
+ * 사이트마다 손으로 NA를 찍으면 그게 조용한 우회 경로가 된다).
+ * `siteCode`는 **테넌트 격리 장치가 아니다** — DB가 이미 사이트별로 분리돼 있으므로
+ * 쿼리 필터로 쓰지 않는다. 배포 식별·승인 기록 결속·준비도 내보내기 라벨 용도다.
+ *
+ * 근거: docs/개시전환센터_기획서.md §6.2a·§6.2b
+ */
+model SiteProfile {
+  id           Int      @id @default(1) // 단일 행 고정
+  siteCode     String   @map("site_code")
+  siteName     String?  @map("site_name")
+  capabilities String   @map("capabilities") // 콤마 구분(HIS,PACS,ERP,…)
+  installedDt  DateTime @default(now()) @map("installed_dt")
+  updatedDt    DateTime @updatedAt @map("updated_dt")
+
+  @@map("site_profile")
+}
+
+/**
+ * 개시 전환 체크리스트 항목의 상태 — 정의는 코드 레지스트리(`golive-registry.ts`)에 있고
+ * 여기에는 **진행 상태만** 둔다(정의를 DB에 두면 업그레이드 때 두 벌이 어긋난다).
+ * `autoCheck`가 있는 항목은 시스템이 판정하므로 이 행이 있어도 무시된다.
+ */
+model GoLiveTaskRecord {
+  code        String    @id
+  status      String    @default("OPEN") // OPEN | DONE | NA
+  owner       String?
+  note        String?
+  naReason    String?   @map("na_reason") // NA는 사유 필수 — 조용한 우회 차단
+  completedBy String?   @map("completed_by")
+  completedDt DateTime? @map("completed_dt")
+  updatedDt   DateTime  @updatedAt @map("updated_dt")
+
+  @@index([status])
+  @@map("golive_task_record")
+}
+
+/**
+ * 개시 근거 문서함 — 결재 공문·회신서·서명본 **원본**을 시스템 안에 둔다.
+ *
+ * 왜 필요한가: 지금은 `org_approval.docNo`(문자열)만 있어 **결재가 실재했는지 소명할 수 없다.**
+ * 원본이 메일·파일서버에 흩어져 있으면 인증·실사에서 1차 증빙을 제출하지 못한다.
+ *
+ * 임상 첨부(`ResultAttachment`)와 **테이블을 분리**한다 — 보존정책·권한·수명주기가 다르다.
+ * `sha256`은 첨부 후 교체 탐지용(서명 워크시트 스냅샷 해시와 같은 발상).
+ *
+ * 근거: docs/개시전환센터_기획서.md §3.3
+ */
+model GoLiveAttachment {
+  attachmentId String   @id @map("attachment_id")
+  // 무엇에 붙는가 — 하나만 채운다(체크리스트 항목 / 조직게이트 / 서명섹션 / 결정등록)
+  taskCode     String?  @map("task_code")
+  gateCode     String?  @map("gate_code")
+  signoffSec   String?  @map("signoff_sec")
+  decisionKey  String?  @map("decision_key")
+
+  category   String // APPROVAL | REPLY | SIGNOFF | LEGAL | EVIDENCE
+  filename   String
+  mimeType   String   @map("mime_type")
+  sizeBytes  Int      @map("size_bytes")
+  sha256     String
+  data       Bytes
+  note       String?
+  uploadedBy String?  @map("uploaded_by")
+  uploadedDt DateTime @default(now()) @map("uploaded_dt")
+
+  @@index([taskCode])
+  @@index([gateCode])
+  @@index([category])
+  @@map("golive_attachment")
+}
+
+/**
+ * 전환 실행 이력 — 비가역 작업을 "언제 누가 무엇을 어떤 순서로" 했는지 남긴다.
+ *
+ * 감사 체인에도 남지만 거기는 전 조치가 섞인 append-only 로그라 **"무엇이 지워졌나"를
+ * 되짚기 어렵다**. 여기는 실행 단위로 전/후 스냅샷을 함께 보관한다.
+ *
+ * ★차단된 시도(BLOCKED)도 기록한다 — 실 환자 데이터가 있는데 정리를 시도했다는 사실 자체가
+ *   운영상 중요한 신호다(누군가 개시 후에 파일럿 절차를 돌리려 했다는 뜻).
+ * 드라이런은 기록하지 않는다(읽기 전용이고 반복 호출돼 이력을 덮는다).
+ *
+ * 근거: docs/개시전환센터_기획서.md §3.4
+ */
+model CutoverRun {
+  runId       String    @id @map("run_id")
+  step        String // 'seed-cleanup:product-demo' · 'lifecycle-purge' 등
+  mode        String // EXEC (드라이런은 기록하지 않는다)
+  result      String // OK | BLOCKED | FAILED
+  requestedBy String?   @map("requested_by")
+  approvedBy  String?   @map("approved_by")
+  beforeJson  String?   @map("before_json") // 실행 전 대상 건수
+  afterJson   String?   @map("after_json") // 실행 결과
+  message     String?
+  startedDt   DateTime  @default(now()) @map("started_dt")
+  finishedDt  DateTime? @map("finished_dt")
+
+  @@index([step])
+  @@index([startedDt])
+  @@map("cutover_run")
+}
+
+model SystemSetting {
+  key       String   @id
+  value     String // 빈 문자열 = 명시적 해제(env로 되살아나지 않는다)
+  updatedBy String?  @map("updated_by")
+  updatedDt DateTime @updatedAt @map("updated_dt")
+
+  @@map("system_setting")
+}
+
+/**
+ * 검사실·법무 서명 기록 — "이 값들을 누가 언제 확정했는가".
+ *
+ * 이전에는 워크시트를 **인쇄해서 손으로 적고**, 회신을 사람이 seed로 옮겨 재배포했다.
+ * 사람이 옮겨 적는 구간이 있으면 임상값은 조용히 틀린다.
+ *
+ * 서명 시점의 값 스냅샷과 해시를 함께 남긴다. 서명 이후 누군가 참고치를 고치면
+ * **해시가 달라져 "서명 이후 변경됨"으로 드러난다** — 서명된 값이 소리 없이 흘러가는 것을 막는다.
+ * 이력은 행을 계속 쌓아 남기고(수정·삭제 없음), 섹션별 최신 행이 현재 서명이다.
+ */
+model SignoffRecord {
+  signoffId    String   @id @map("signoff_id")
+  section      String // A~G (워크시트 섹션)
+  signerName   String   @map("signer_name") // 확정한 사람(실명 — 계정과 별개일 수 있다)
+  signerRole   String?  @map("signer_role")
+  signedBy     String?  @map("signed_by") // 기입한 계정(AppUser.userId)
+  documentNo   String?  @map("document_no")
+  note         String?
+  snapshotHash String   @map("snapshot_hash")
+  snapshotJson String   @map("snapshot_json")
+  signedDt     DateTime @default(now()) @map("signed_dt")
+
+  @@index([section, signedDt])
+  @@map("signoff_record")
+}
+
+/**
+ * 분자진단 assay 카탈로그 — 패널별 타깃과 Ct 판정 한계.
+ *
+ * 왜 필요한가: `MolecularResult.target`이 자유 문자열이라 "SARS-CoV-2"와 "SARS-CoV2"가
+ * 조용히 다른 타깃이 된다 — 추세 비교가 끊기고 법정감염병 매칭도 빗나간다.
+ * Ct 판정 한계도 키트·타깃마다 다른데 코드에 40으로 고정돼 있었다.
+ * "외부 스펙 대기"로 분류돼 있었지만 실은 **검사실이 키트 문서를 보고 채우는 값**이다.
+ */
+model MolecularAssay {
+  panelCode     String   @map("panel_code")
+  target        String
+  assayName     String?  @map("assay_name") // 키트·검사법
+  ctCutoff      Float?   @map("ct_cutoff") // 이 값을 넘으면 검출로 보지 않는다(키트별 상이)
+  equivocalFrom Float?   @map("equivocal_from") // 이 값부터 cutoff까지는 판정보류 구간
+  note          String?
+  updatedBy     String?  @map("updated_by")
+  updatedDt     DateTime @updatedAt @map("updated_dt")
+
+  @@id([panelCode, target])
+  @@index([target])
+  @@map("molecular_assay")
+}
+
+/**
+ * NGS 패널 — 패널·플랫폼별 QC 임계.
+ * 임계가 코드 상수 하나였다. 패널이 둘 이상이 되는 순간 맞지 않는다(타깃 패널과 WES는
+ * 요구 coverage가 자릿수로 다르다). 값이 없으면 코드 기본값을 쓴다.
+ */
+model NgsPanel {
+  panelCode       String   @id @map("panel_code")
+  name            String
+  platform        String?
+  q30Min          Float?   @map("q30_min")
+  meanCoverageMin Float?   @map("mean_coverage_min")
+  uniformityMin   Float?   @map("uniformity_min")
+  note            String?
+  updatedBy       String?  @map("updated_by")
+  updatedDt       DateTime @updatedAt @map("updated_dt")
+
+  @@map("ngs_panel")
+}
+
+/**
+ * 카탈로그 버전 — 연 1회 개정판을 반입하는 표준 코드셋(CLSI 브레이크포인트 등).
+ *
+ * 왜 화면 편집이 아니라 반입인가: 이 값들은 검사실이 한 줄씩 손으로 고치는 값이 아니라
+ * **발행기관 개정판을 통째로 갈아 끼우는** 값이다. 손 편집을 허용하면 어느 줄이 개정판이고
+ * 어느 줄이 사람이 만진 것인지 알 수 없게 된다.
+ *
+ * 반입은 항상 DRAFT로 들어오고, **활성 버전과의 차이를 확인한 뒤에만** 활성화한다.
+ * 브레이크포인트 한 줄이 바뀌면 그 약제의 S/I/R 판정이 뒤집히고 곧 항생제 선택이 달라지므로,
+ * 무엇이 바뀌는지 모른 채 바꾸는 일이 없어야 한다. 이전 버전은 지우지 않고 RETIRED로 남긴다
+ * (지난 보고서가 어느 기준으로 판정됐는지 소명할 수 있어야 한다).
+ */
+model CatalogVersion {
+  catalogId     String   @map("catalog_id") // 'AST_BREAKPOINT' 등
+  version       String // 발행 버전(예: 'CLSI-M100-2025')
+  standard      String? // 표기용 표준명(보고서에 실린다)
+  effectiveDate String?  @map("effective_date")
+  status        String   @default("DRAFT") // DRAFT/ACTIVE/RETIRED
+  itemCount     Int      @default(0) @map("item_count")
+  note          String?
+  importedBy    String?  @map("imported_by")
+  importedDt    DateTime @default(now()) @map("imported_dt")
+  activatedBy   String?  @map("activated_by")
+  activatedDt   DateTime? @map("activated_dt")
+
+  items CatalogItem[]
+
+  @@id([catalogId, version])
+  @@index([catalogId, status])
+  @@map("catalog_version")
+}
+
+/** 카탈로그 항목 — key는 카탈로그마다 의미가 다르다(AST는 '균군|약제'). */
+model CatalogItem {
+  itemId     String   @id @map("item_id")
+  catalogId  String   @map("catalog_id")
+  version    String
+  itemKey    String   @map("item_key")
+  payload    String // JSON
+
+  parent CatalogVersion @relation(fields: [catalogId, version], references: [catalogId, version], onDelete: Cascade)
+
+  @@unique([catalogId, version, itemKey])
+  @@index([catalogId, version])
+  @@map("catalog_item")
+}
+
+/**
+ * 개시 조직/외부 결정 등록 — 시스템 상태로 추론 불가한 '사람·조직 결정'(인프라 이전·PACS 컷오버·
+ * 보존기간 법무 확정값·외부 라이선스/코드셋 등)을 결정값·주체·근거문서와 함께 캡처.
+ * key는 코드 레지스트리(DECISION_ITEMS)와 매칭. recordedBy는 서버가 JWT로 결속(기입 부인방지),
+ * decidedByName은 실제 결정 주체(외부 인물·부서 자유텍스트).
+ */
+model DecisionRecord {
+  decisionId    String   @id @default(cuid()) @map("decision_id")
+  key           String   @unique // 레지스트리 키(retention_legal 등)
+  status        String   @default("PENDING") // PENDING/IN_PROGRESS/DECIDED/HOLD
+  decidedValue  String?  @map("decided_value") // 결정 내용/값
+  decidedByName String?  @map("decided_by_name") // 결정 주체(외부 인물·부서)
+  decidedBy     String?  @map("decided_by") // LIS 기입 인증계정(서버 결속)
+  decidedDate   String?  @map("decided_date")
+  documentRef   String?  @map("document_ref") // 근거 문서번호/링크
+  note          String?
+  updatedDt     DateTime @default(now()) @updatedAt @map("updated_dt")
+
+  @@map("decision_record")
+}
+
+/**
+ * 개시 승인(Go-Live) — 조직의 최종 GO/NO-GO 결정. 콘솔 개시차단(blockingOpen)이 0이어야 승인 가능하며,
+ * 부득이한 override 시 사유·잔여위험을 명시한다. approvedBy는 서버가 JWT로 결속(부인방지).
+ * 승인/철회 이력(로그) — 최신 행이 현재 상태. blockingSnapshot에 승인 시점의 차단 항목을 남긴다(소명).
+ */
+model GoLiveApproval {
+  approvalId       String   @id @default(cuid()) @map("approval_id")
+  action           String   // APPROVED / REVOKED
+  approvedByName   String?  @map("approved_by_name") // 승인 주체(개시 책임자·부서)
+  approvedBy       String?  @map("approved_by") // LIS 기입 인증계정(서버 결속)
+  approvedDate     String?  @map("approved_date")
+  override         Boolean  @default(false) // 차단 잔존에도 강행 승인 여부
+  residualRisk     String?  @map("residual_risk") // override 시 잔여위험·사유
+  blockingSnapshot String?  @map("blocking_snapshot") // 승인 시점 미해소 blocking 항목(JSON)
+  // 승인 시점 **체크리스트 전문**(JSON) — "무엇을 확인하고 승인했는가"를 나중에 재구성한다.
+  // blockingSnapshot과 분리한다: 그쪽은 APPROVED_STALE 판정이 `{key}[]`로 파싱하므로
+  // 형식이 섞이면 승인 무효 판정이 조용히 깨진다.
+  checklistSnapshot String? @map("checklist_snapshot")
+  registryVersion   String? @map("registry_version") // 그때의 레지스트리 버전(§6.4 — 항목 해석용)
+  note             String?
+  createdDt        DateTime @default(now()) @map("created_dt")
+
+  @@index([createdDt])
+  @@map("golive_approval")
+}

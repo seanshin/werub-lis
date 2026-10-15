@@ -1,0 +1,169 @@
+# LIS 프로덕션 배포 (weruby 서버) — 기존 서비스와 포트 격리
+# 검토 결과: 4100(sign-core)·3100(jitsi-api) 사용중 → LIS는 API 4101 / Web 3101 사용
+# postgres/redis는 호스트 노출 없이 내부 네트워크 전용(충돌·노출 방지)
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lis-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lis
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD 필수}
+      POSTGRES_DB: lis
+    volumes:
+      - lis_pgdata:/var/lib/postgresql/data
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    shm_size: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lis"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # 호스트 포트 미노출(내부 전용)
+
+  # redis: 제거됨(2026-07-21 보안 검토).
+  #   API 코드에 사용처가 0건이었다(throttler는 in-memory — 체크리스트 C6에서 스케일아웃 전까지 보류 결정).
+  #   무인증(requirepass 없음)으로 상주하던 불필요한 공격 표면이라 내렸다.
+  #   스케일아웃으로 분산 throttler·캐시가 필요해지면, 공유 redis(6379)는 불가침이므로
+  #   전용 인스턴스를 requirepass와 함께 다시 추가할 것.
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    image: lis-api:latest
+    container_name: lis-api
+    restart: unless-stopped
+    logging: # 공유 호스트 디스크 보호(HIS 합의 2026-07-22) — daemon.json 불변, 재생성 시 자연 적용
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # connection_limit 명시(2026-07-30 성능 검토): 기본값(코어수×2+1)은 2vCPU에서 5 —
+      # 크론 11개+요청 동시성이 겹치면 슬로쿼리 한 건에 풀이 고갈돼 P2024가 연쇄된다.
+      # lis-postgres 전용 컨테이너(max_connections=100) 기준 여유 있게 20.
+      DATABASE_URL: postgresql://lis:${DB_PASSWORD:?DB_PASSWORD 필수}@postgres:5432/lis?schema=public&connection_limit=20&pool_timeout=20
+      PORT: 4100
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET 필수}
+      JWT_EXPIRES: "8h"
+      CORS_ORIGIN: ${PUBLIC_ORIGIN:-https://lis.example.org}
+      # HIS/PACS 연계(자격증명 수령 후 .env로 주입)
+      HIS_FHIR_BASE: ${HIS_FHIR_BASE:-}
+      HIS_FHIR_TOKEN_URL: ${HIS_FHIR_TOKEN_URL:-}
+      HIS_CLIENT_ID: ${HIS_CLIENT_ID:-}
+      HIS_CLIENT_SECRET: ${HIS_CLIENT_SECRET:-}
+      HIS_FHIR_SCOPES: ${HIS_FHIR_SCOPES:-}
+      HIS_ORDER_POLL: ${HIS_ORDER_POLL:-}
+      HIS_REFLEX_POLL: ${HIS_REFLEX_POLL:-}
+      HIS_REFLEX_RETRY: ${HIS_REFLEX_RETRY:-}
+      HIS_REFLEX_WEBHOOK_TOKEN: ${HIS_REFLEX_WEBHOOK_TOKEN:-}
+      PACS_BASE: ${PACS_BASE:-}
+      PACS_USER: ${PACS_USER:-}
+      PACS_PASS: ${PACS_PASS:-}
+      PACS_MLLP_HOST: ${PACS_MLLP_HOST:-}
+      PACS_MLLP_PORT: ${PACS_MLLP_PORT:-2575}
+      HIS_HTTP_TIMEOUT_MS: ${HIS_HTTP_TIMEOUT_MS:-}
+      HIS_ORDER_TRANSPORT: ${HIS_ORDER_TRANSPORT:-}
+      # HIS 참조 어댑터(조직게이트 결재·수혈 동의) — 미주입 시 어댑터는 "미구성" fail-safe로 남음
+      HIS_INTEGRATION_BASE: ${HIS_INTEGRATION_BASE:-}
+      HIS_INTEGRATION_KEY: ${HIS_INTEGRATION_KEY:-}
+      # 위험치 실통보 채널(환자안전) — 미전달: 이 변수 미주입 시 webhook 미발화. 개시 전 실채널 주입.
+      CRITICAL_WEBHOOK_URL: ${CRITICAL_WEBHOOK_URL:-}
+      CRITICAL_RETRY: ${CRITICAL_RETRY:-}
+      # 위험치 웹훅: 기본 https 강제·환자명 마스킹·HMAC 서명(수신측 진위 검증)
+      CRITICAL_WEBHOOK_SECRET: ${CRITICAL_WEBHOOK_SECRET:-}
+      CRITICAL_WEBHOOK_ALLOW_HTTP: ${CRITICAL_WEBHOOK_ALLOW_HTTP:-}
+      CRITICAL_WEBHOOK_FULL_NAME: ${CRITICAL_WEBHOOK_FULL_NAME:-}
+      # ERP 청구 전송(원무/청구) — 미주입 시 청구 메시지는 로컬 PENDING 스테이징(유실 없음). 개시 시 실 URL·시크릿 주입.
+      ERP_BILLING_URL: ${ERP_BILLING_URL:-}
+      ERP_BILLING_SECRET: ${ERP_BILLING_SECRET:-}
+      # 청구 전송 자율화 크론(재전송·폴링) — off로 비활성. 기본 on(ERP 미구성이면 크론이 즉시 skip).
+      BILLING_SWEEP: ${BILLING_SWEEP:-}
+      # 오프사이트 백업 경로(backup.sh용) — api는 개시 준비도 점검에서 설정 여부만 읽음.
+      LIS_BACKUP_OFFSITE: ${LIS_BACKUP_OFFSITE:-}
+      # 리버스 프록시 신뢰 홉 수(레이트리밋·감사 IP 정확도)
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-}
+      # 연계 운영 감시(DLQ/stuck) — 임상 위험치 채널과 분리된 OPS 알림
+      OPS_WEBHOOK_URL: ${OPS_WEBHOOK_URL:-}
+      OPS_MONITOR: ${OPS_MONITOR:-}
+      OPS_STUCK_MINUTES: ${OPS_STUCK_MINUTES:-}
+      OPS_DLQ_THRESHOLD: ${OPS_DLQ_THRESHOLD:-}
+      OPS_STUCK_THRESHOLD: ${OPS_STUCK_THRESHOLD:-}
+      OPS_CRITICAL_THRESHOLD: ${OPS_CRITICAL_THRESHOLD:-}
+      # Swagger 운영 노출 스위치(기본 비활성) — 필요 시에만 true
+      ENABLE_SWAGGER: ${ENABLE_SWAGGER:-}
+      # 보존기간 퍼지 크론(C8) — 'on' 일 때만 실행. 법무 확정 전까지 미설정(=미실행) 유지
+      LIFECYCLE_PURGE: ${LIFECYCLE_PURGE:-}
+      # 사이트 식별(설치 1:1:1) — install.sh가 .env에 쓰지만 여기 없으면 콘솔이 영구 'UNSET'이다
+      LIS_SITE_CODE: ${LIS_SITE_CODE:-}
+      # 운영 정책 튜너블(미주입 시 코드 기본값: 에스컬레이션 15분·수혈 반납 30분)
+      CRITICAL_ESCALATION_MINUTES: ${CRITICAL_ESCALATION_MINUTES:-}
+      TRANSFUSION_RETURN_MINUTES: ${TRANSFUSION_RETURN_MINUTES:-}
+      # 미발송 위탁 노화 알림 기준(일). 미설정 시 코드 기본 3일.
+      SENDOUT_STALE_DAYS: ${SENDOUT_STALE_DAYS:-}
+      # 오더 폴링 정체 임계(분) — 미설정 시 코드 기본 30분(폴링 주기 5분×6)
+      OPS_POLL_STALE_MINUTES: ${OPS_POLL_STALE_MINUTES:-}
+      # PACS MWL 송신 실패 임계 — 미설정 시 0(1건이라도 개입)
+      OPS_MWL_THRESHOLD: ${OPS_MWL_THRESHOLD:-}
+      # ERP 청구 미전송 정체 임계 — 미설정 시 0(1건이라도 개입). 반송(REJECTED)은 미포함
+      OPS_BILLING_THRESHOLD: ${OPS_BILLING_THRESHOLD:-}
+      # S-3 대상토큰 서명 시크릿 — HIS lis.targetTokenSecret과 대칭. 미설정 시 HIS_INTEGRATION_KEY 폴백.
+      #   분리해두면 인증 키와 토큰 시크릿을 독립 회전할 수 있다(회전 창 제거).
+      HIS_TARGET_TOKEN_SECRET: ${HIS_TARGET_TOKEN_SECRET:-}
+    # 공유 호스트(HIS 등 동거) 격리 — 권한 상승 차단 + 자원 상한.
+    #   상한이 없으면 대용량 업로드·대형 쿼리로 lis-api가 호스트 메모리를 소진해
+    #   OOM killer가 HIS 컨테이너를 죽일 수 있다(불간섭 원칙이 자원 레벨에서도 지켜져야 함).
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 2g
+    pids_limit: 512
+    extra_hosts:
+      - "pacs-hl7:host-gateway" # PACS MLLP(172.25.0.1:2575) 호스트 경유 접근(B-4)
+    ports:
+      - "127.0.0.1:4101:4100" # nginx가 프록시
+    stop_grace_period: 20s # graceful shutdown 드레인 여유
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:4100/api/v1/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: "" # same-origin(nginx 프록시)
+        # 기본값은 안전한 쪽(비노출). 파일럿에서 테스트 계정 패널이 필요하면 .env에 NEXT_PUBLIC_DEMO=1을
+        # 넣고 web을 재빌드할 것 — 기본값을 "1"로 두면 개시일 플립을 빠뜨렸을 때 그대로 공개된다.
+        NEXT_PUBLIC_DEMO: ${NEXT_PUBLIC_DEMO:-}
+    image: lis-web:latest
+    container_name: lis-web
+    restart: unless-stopped
+    logging: # 공유 호스트 디스크 보호(HIS 합의 2026-07-22) — daemon.json 불변, 재생성 시 자연 적용
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    depends_on:
+      - api
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 1g
+    pids_limit: 256
+    ports:
+      - "127.0.0.1:3101:3100" # nginx가 프록시
+
+volumes:
+  lis_pgdata:

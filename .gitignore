@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.next/
+.turbo/
+*.log
+.env
+.env.local
+# 스크립트가 만드는 .env 파생물(스모크 백업·회전 백업) — 운영 시크릿이 담긴다.
+# 이제 임시디렉터리를 쓰지만, 과거 산출물이나 수동 사본이 커밋되지 않도록 남겨 둔다.
+.env.*bak*
+.env.smokebak
+apps/api/prisma/*.db
+dev/*.db
+coverage/
+
+# 배포 리포에서 대용량 산출물 제외
+LIS_문서패키지_v2.0.zip
+LIS_통합본_전체.pdf

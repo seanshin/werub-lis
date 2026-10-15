@@ -1,0 +1,385 @@
+<title>LIS 화면 프로토타입</title>
+<style>
+  :root {
+    --bg: #EEF3F3; --surface: #FFFFFF; --surface-2: #F4F8F8; --surface-3: #E8F0F0;
+    --ink: #13272C; --ink-2: #4C5D62; --ink-3: #7A8A8E; --line: #DBE6E6;
+    --teal: #0E7C86; --teal-2: #0A6068; --teal-soft: #E1F0F1;
+    --indigo: #6244C9; --indigo-soft: #EBE7FA;
+    --good: #1E9968; --good-soft: #E3F3EB;
+    --warn: #B7841A; --warn-soft: #F7EFD9;
+    --crit: #C64A3C; --crit-soft: #F8E5E2;
+    --shadow: 0 1px 2px rgba(19,39,44,.05), 0 6px 20px rgba(19,39,44,.06);
+    --font-body: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0B1517; --surface: #10211F; --surface-2: #13252A; --surface-3: #182E31;
+      --ink: #E7F0F0; --ink-2: #A5B7B9; --ink-3: #75898C; --line: #24393C;
+      --teal: #45BEC5; --teal-2: #6FD3D8; --teal-soft: #10312F;
+      --indigo: #A692F2; --indigo-soft: #211C39;
+      --good: #43BE89; --good-soft: #10291F; --warn: #D6A63F; --warn-soft: #2C2410;
+      --crit: #E0675A; --crit-soft: #331813;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 22px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"]{--bg:#EEF3F3;--surface:#FFFFFF;--surface-2:#F4F8F8;--surface-3:#E8F0F0;--ink:#13272C;--ink-2:#4C5D62;--ink-3:#7A8A8E;--line:#DBE6E6;--teal:#0E7C86;--teal-2:#0A6068;--teal-soft:#E1F0F1;--indigo:#6244C9;--indigo-soft:#EBE7FA;--good:#1E9968;--good-soft:#E3F3EB;--warn:#B7841A;--warn-soft:#F7EFD9;--crit:#C64A3C;--crit-soft:#F8E5E2;--shadow:0 1px 2px rgba(19,39,44,.05),0 6px 20px rgba(19,39,44,.06);}
+  :root[data-theme="dark"]{--bg:#0B1517;--surface:#10211F;--surface-2:#13252A;--surface-3:#182E31;--ink:#E7F0F0;--ink-2:#A5B7B9;--ink-3:#75898C;--line:#24393C;--teal:#45BEC5;--teal-2:#6FD3D8;--teal-soft:#10312F;--indigo:#A692F2;--indigo-soft:#211C39;--good:#43BE89;--good-soft:#10291F;--warn:#D6A63F;--warn-soft:#2C2410;--crit:#E0675A;--crit-soft:#331813;--shadow:0 1px 2px rgba(0,0,0,.3),0 8px 22px rgba(0,0,0,.35);}
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); -webkit-font-smoothing: antialiased; font-size: 14px; }
+  .mono { font-family: var(--font-mono); }
+
+  /* ---- app shell ---- */
+  .app { display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+  .topbar {
+    display: flex; align-items: center; gap: 16px; padding: 0 18px; height: 52px;
+    background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5;
+  }
+  .brand { font-weight: 800; letter-spacing: -.02em; font-size: 18px; color: var(--teal); display: flex; align-items: center; gap: 8px; }
+  .brand .g { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(150deg,var(--teal),var(--indigo)); display: inline-block; }
+  .topsearch { margin-left: 8px; flex: 1; max-width: 340px; }
+  .topsearch input {
+    width: 100%; padding: 7px 12px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--surface-2); color: var(--ink); font-family: var(--font-mono); font-size: 12.5px;
+  }
+  .topright { margin-left: auto; display: flex; align-items: center; gap: 14px; font-size: 12.5px; color: var(--ink-2); }
+  .bell { position: relative; }
+  .bell .badge { position: absolute; top: -6px; right: -8px; background: var(--crit); color: #fff; font-size: 10px; font-weight: 700; border-radius: 999px; padding: 1px 5px; font-family: var(--font-mono); }
+  .who { display: flex; align-items: center; gap: 7px; }
+  .avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--teal-soft); color: var(--teal-2); display: grid; place-items: center; font-weight: 700; font-size: 12px; }
+
+  .body { display: grid; grid-template-columns: 208px 1fr; min-height: 0; }
+  nav.side { background: var(--surface); border-right: 1px solid var(--line); padding: 12px 10px; overflow-y: auto; }
+  .navlabel { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); padding: 12px 10px 6px; }
+  .navitem {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    padding: 9px 11px; border-radius: 9px; border: none; background: none; color: var(--ink-2);
+    font-family: var(--font-body); font-size: 13.5px; cursor: pointer; margin-bottom: 2px;
+  }
+  .navitem:hover { background: var(--surface-2); color: var(--ink); }
+  .navitem[aria-current="true"] { background: var(--teal-soft); color: var(--teal-2); font-weight: 700; }
+  .navitem .ic { width: 8px; height: 8px; border-radius: 2px; background: currentColor; opacity: .6; flex: none; }
+  .navitem.gen[aria-current="true"] { background: var(--indigo-soft); color: var(--indigo); }
+
+  main { overflow-y: auto; padding: 22px 26px 60px; min-width: 0; }
+  .page { display: none; }
+  .page.active { display: block; animation: fade .25s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .page.active { animation: none; } }
+
+  .pagehead { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+  .pagehead h1 { font-size: 20px; font-weight: 750; letter-spacing: -.01em; margin: 0; }
+  .pagehead .scr { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); background: var(--surface-2); padding: 3px 8px; border-radius: 6px; }
+  .pagehead .spacer { flex: 1; }
+
+  /* ---- common ---- */
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 13px; box-shadow: var(--shadow); }
+  .pad { padding: 16px 18px; }
+  .grid { display: grid; gap: 14px; }
+  .btn { font-family: var(--font-body); font-size: 13px; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; font-weight: 600; }
+  .btn:hover { background: var(--surface-2); }
+  .btn.primary { background: var(--teal); border-color: var(--teal); color: #fff; }
+  .btn.primary:hover { background: var(--teal-2); }
+  .btn.crit { background: var(--crit); border-color: var(--crit); color: #fff; }
+  .btn.indigo { background: var(--indigo); border-color: var(--indigo); color: #fff; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  button:focus-visible, input:focus-visible, .navitem:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+  .pill { font-family: var(--font-mono); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; display: inline-flex; align-items: center; gap: 5px; }
+  .pill.n { background: var(--surface-3); color: var(--ink-2); }
+  .pill.good { background: var(--good-soft); color: var(--good); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.crit { background: var(--crit-soft); color: var(--crit); }
+  .pill.indigo { background: var(--indigo-soft); color: var(--indigo); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .tscroll { overflow-x: auto; }
+  th { text-align: left; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; padding: 9px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  tr:last-child td { border-bottom: none; }
+  .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  tr.alert td { background: var(--crit-soft); }
+
+  /* ---- dashboard ---- */
+  .stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-bottom: 16px; }
+  .stat { background: var(--surface); border: 1px solid var(--line); border-radius: 13px; padding: 15px 16px; box-shadow: var(--shadow); }
+  .stat .v { font-family: var(--font-mono); font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+  .stat .l { font-size: 12.5px; color: var(--ink-2); margin-top: 3px; }
+  .stat.alert .v { color: var(--crit); }
+  .dash { display: grid; grid-template-columns: 1.3fr 1fr; gap: 14px; }
+  .minirow { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+  .minirow:last-child { border-bottom: none; }
+  .ch { font-weight: 700; font-size: 13px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+  .ledger { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-2); }
+  .sig { width: 8px; height: 8px; border-radius: 50%; }
+
+  /* ---- receive ---- */
+  .two { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; align-items: start; }
+  .patientbar { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 12px 16px; background: var(--surface-2); border-radius: 11px; margin-bottom: 14px; }
+  .patientbar .nm { font-weight: 750; font-size: 15px; }
+  .patientbar .meta { font-family: var(--font-mono); font-size: 12px; color: var(--ink-2); }
+  .label-preview { border: 1.5px dashed var(--teal); border-radius: 10px; padding: 14px; background: var(--teal-soft); }
+  .barcode { height: 34px; background: repeating-linear-gradient(90deg, var(--ink) 0 2px, transparent 2px 4px, var(--ink) 4px 5px, transparent 5px 9px); border-radius: 3px; margin-bottom: 8px; opacity: .85; }
+  input[type=checkbox] { accent-color: var(--teal); width: 15px; height: 15px; }
+
+  /* ---- pathology ---- */
+  .pathgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+  .imgbox { aspect-ratio: 4/3; border-radius: 10px; background: linear-gradient(135deg,#b9548e22,#6244c922), var(--surface-3); display: grid; place-items: center; color: var(--ink-3); font-size: 12px; border: 1px solid var(--line); position: relative; overflow: hidden; }
+  .imgbox::after { content: "PACS · WADO"; position: absolute; bottom: 8px; right: 10px; font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; color: var(--ink-3); margin-bottom: 5px; font-weight: 600; }
+  .field .box { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; font-size: 13px; color: var(--ink); min-height: 20px; }
+
+  /* ---- genomic ---- */
+  .steps2 { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+  .s2 { font-family: var(--font-mono); font-size: 11.5px; padding: 6px 11px; border-radius: 7px; background: var(--surface-3); color: var(--ink-3); }
+  .s2.done { background: var(--good-soft); color: var(--good); }
+  .s2.cur { background: var(--indigo-soft); color: var(--indigo); font-weight: 700; }
+
+  .placeholder { display: grid; place-items: center; height: 60vh; color: var(--ink-3); text-align: center; gap: 8px; }
+  .placeholder .big { font-size: 15px; font-weight: 700; color: var(--ink-2); }
+
+  .note { font-size: 12px; color: var(--ink-3); margin-top: 14px; padding: 10px 14px; background: var(--surface-2); border-radius: 9px; border-left: 3px solid var(--teal); }
+
+  @media (max-width: 820px) {
+    .body { grid-template-columns: 1fr; }
+    nav.side { display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--line); padding: 8px; gap: 4px; }
+    .navlabel { display: none; }
+    .navitem { white-space: nowrap; margin-bottom: 0; }
+    .stats { grid-template-columns: repeat(2,1fr); }
+    .dash, .two, .pathgrid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="app">
+  <div class="topbar">
+    <div class="brand"><span class="g"></span>LIS</div>
+    <div class="topsearch"><input type="text" placeholder="환자 검색 (등록번호/성명)" aria-label="환자 검색" value="" /></div>
+    <div class="topright">
+      <span class="bell" title="위험치 알림">🔔<span class="badge">2</span></span>
+      <span class="who"><span class="avatar">이</span>이검사 · 임상병리사</span>
+    </div>
+  </div>
+
+  <div class="body">
+    <nav class="side" aria-label="주 메뉴">
+      <div class="navlabel">검사 업무</div>
+      <button class="navitem" aria-current="true" data-t="dash"><span class="ic"></span>대시보드</button>
+      <button class="navitem" data-t="receive"><span class="ic"></span>검체 접수</button>
+      <button class="navitem" data-t="result"><span class="ic"></span>결과 검증</button>
+      <button class="navitem" data-t="path"><span class="ic"></span>병리 판독</button>
+      <button class="navitem gen" data-t="genomic"><span class="ic"></span>유전체 변이</button>
+      <div class="navlabel">기타</div>
+      <button class="navitem" data-t="soon" data-n="워크리스트"><span class="ic"></span>워크리스트</button>
+      <button class="navitem" data-t="soon" data-n="수혈 관리"><span class="ic"></span>수혈 관리</button>
+      <button class="navitem" data-t="soon" data-n="미생물"><span class="ic"></span>미생물</button>
+      <button class="navitem" data-t="soon" data-n="정도관리(QC)"><span class="ic"></span>정도관리</button>
+      <button class="navitem" data-t="soon" data-n="통계/리포트"><span class="ic"></span>통계·리포트</button>
+    </nav>
+
+    <main>
+      <!-- 대시보드 -->
+      <section class="page active" id="dash">
+        <div class="pagehead"><h1>대시보드</h1><span class="scr">SCR-00</span><span class="spacer"></span><span class="mono" style="font-size:12px;color:var(--ink-3)">2026-07-12 10:45</span></div>
+        <div class="stats">
+          <div class="stat"><div class="v">152</div><div class="l">오늘 접수</div></div>
+          <div class="stat"><div class="v">34</div><div class="l">진행 중</div></div>
+          <div class="stat"><div class="v">12</div><div class="l">결과 대기</div></div>
+          <div class="stat alert"><div class="v">2</div><div class="l">위험치 통보 대기</div></div>
+        </div>
+        <div class="dash">
+          <div class="card pad">
+            <p class="ch">위험치(Panic) 통보 대기</p>
+            <div class="tscroll"><table>
+              <thead><tr><th>환자</th><th>검사</th><th>결과</th><th>판정</th><th></th></tr></thead>
+              <tbody>
+                <tr class="alert"><td>홍길동</td><td>Hemoglobin</td><td class="num">6.5 g/dL</td><td><span class="pill crit">LL</span></td><td><button class="btn crit" style="padding:5px 10px">통보</button></td></tr>
+                <tr class="alert"><td>김철수</td><td>Potassium</td><td class="num">6.8 mmol/L</td><td><span class="pill crit">HH</span></td><td><button class="btn crit" style="padding:5px 10px">통보</button></td></tr>
+              </tbody>
+            </table></div>
+            <p class="ch" style="margin-top:18px">분야별 미결 현황</p>
+            <div class="minirow"><span>진단검사의학</span><span class="num">8건</span></div>
+            <div class="minirow"><span>미생물·분자진단</span><span class="num">2건</span></div>
+            <div class="minirow"><span>병리</span><span class="num">1건</span></div>
+            <div class="minirow"><span>수혈</span><span class="num">1건</span></div>
+            <div class="minirow"><span>유전체 (수탁 대기 3)</span><span class="num">5건</span></div>
+          </div>
+          <div class="grid" style="align-content:start">
+            <div class="card pad">
+              <p class="ch">TAT 모니터링</p>
+              <div class="minirow"><span>응급 평균</span><span><span class="num">42분</span> <span class="pill good">목표 60분 ✓</span></span></div>
+              <div class="minirow"><span>일반 평균</span><span class="num">3.2시간</span></div>
+              <div class="minirow"><span>유전체 진행</span><span class="num">5건</span></div>
+            </div>
+            <div class="card pad">
+              <p class="ch">QC 경고</p>
+              <div class="ledger"><span class="sig" style="background:var(--warn)"></span>화학2호기 · Glucose · Westgard <b class="mono">1-3s</b> 위반</div>
+            </div>
+            <div class="card pad">
+              <p class="ch">연계 상태</p>
+              <div class="row">
+                <span class="ledger"><span class="sig" style="background:var(--good)"></span>HIS 정상</span>
+                <span class="ledger"><span class="sig" style="background:var(--good)"></span>PACS 정상</span>
+                <span class="ledger"><span class="sig" style="background:var(--good)"></span>수탁센터 정상</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 검체 접수 -->
+      <section class="page" id="receive">
+        <div class="pagehead"><h1>검체 접수 / 라벨 발행</h1><span class="scr">SCR-01</span></div>
+        <div class="patientbar">
+          <span class="nm">홍길동</span>
+          <span class="meta">M / 46 · 등록번호 1234567</span>
+          <span class="pill n">외래 · 내과</span>
+          <span class="meta">처방의 김의사</span>
+        </div>
+        <div class="two">
+          <div class="card pad">
+            <p class="ch">HIS 처방 목록 <span class="pill n">미접수</span></p>
+            <div class="tscroll"><table>
+              <thead><tr><th style="width:34px"><input type="checkbox" checked aria-label="전체"/></th><th>처방번호</th><th>검사명</th><th>검체</th><th>응급</th></tr></thead>
+              <tbody>
+                <tr><td><input type="checkbox" checked /></td><td class="num">H..00123</td><td>CBC 일반혈액</td><td>Whole blood</td><td>—</td></tr>
+                <tr><td><input type="checkbox" checked /></td><td class="num">H..00124</td><td>임상화학 패널</td><td>Serum</td><td>—</td></tr>
+                <tr><td><input type="checkbox" /></td><td class="num">H..00125</td><td>소변검사</td><td>Urine</td><td>—</td></tr>
+              </tbody>
+            </table></div>
+            <div class="row" style="margin-top:14px"><span class="meta mono" style="color:var(--ink-3);font-size:12px">선택 2건</span><span class="spacer" style="flex:1"></span><button class="btn">접수 취소</button><button class="btn primary">접수 &amp; 라벨 출력</button></div>
+          </div>
+          <div class="card pad">
+            <p class="ch">발행 라벨 미리보기</p>
+            <div class="label-preview">
+              <div class="barcode"></div>
+              <div class="mono" style="font-size:12px">L2026071200088</div>
+              <div style="font-weight:750;margin-top:4px">홍길동 · Serum</div>
+              <div class="mono" style="font-size:11.5px;color:var(--ink-2)">1234567 · 2026-07-12 09:15</div>
+            </div>
+            <p class="note">접수 시 검체번호 자동 채번, 패널은 항목 자동 전개. HIS에 접수상태(IF-07) 회신.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 결과 검증 -->
+      <section class="page" id="result">
+        <div class="pagehead"><h1>결과 입력 · 검증</h1><span class="scr">SCR-03</span></div>
+        <div class="patientbar">
+          <span class="mono" style="font-weight:700">검체 ..088</span>
+          <span class="nm">홍길동</span><span class="meta">M/46</span>
+          <span class="pill n">임상화학</span>
+        </div>
+        <div class="card">
+          <div class="tscroll"><table>
+            <thead><tr><th>항목</th><th>결과</th><th>단위</th><th>참고치</th><th>판정</th><th>델타</th><th>검증</th></tr></thead>
+            <tbody>
+              <tr><td>Glucose</td><td class="num">98</td><td>mg/dL</td><td class="num">70–100</td><td><span class="pill n">N</span></td><td class="num">+3</td><td><span class="pill good">auto ✓</span></td></tr>
+              <tr><td>BUN</td><td class="num">15</td><td>mg/dL</td><td class="num">8–20</td><td><span class="pill n">N</span></td><td class="num">–</td><td><span class="pill good">auto ✓</span></td></tr>
+              <tr class="alert"><td><b>Potassium</b></td><td class="num"><b>6.8</b></td><td>mmol/L</td><td class="num">3.5–5.1</td><td><span class="pill crit">HH</span></td><td class="num">+1.9</td><td><span class="pill warn">수동 ⚠</span></td></tr>
+              <tr><td>Sodium</td><td class="num">140</td><td>mmol/L</td><td class="num">135–145</td><td><span class="pill n">N</span></td><td class="num">–</td><td><span class="pill good">auto ✓</span></td></tr>
+            </tbody>
+          </table></div>
+          <div class="pad" style="border-top:1px solid var(--line);background:var(--crit-soft);border-radius:0 0 13px 13px">
+            <div class="row"><b style="color:var(--crit)">⚠ Potassium 6.8 위험치(Panic)</b><span class="spacer" style="flex:1"></span>
+              <button class="btn">재검 지정</button><button class="btn">희석 재검</button><button class="btn crit">위험치 통보 등록</button>
+            </div>
+          </div>
+        </div>
+        <div class="row" style="margin-top:14px;justify-content:flex-end">
+          <button class="btn">보류</button>
+          <button class="btn">1차 검증</button>
+          <button class="btn primary">2차 검증 · 확정 → HIS 전송</button>
+        </div>
+        <p class="note">자동검증(auto)은 참고치·델타·QC·플래그 조건을 모두 만족한 항목. 위험치·델타 초과는 수동 검증 대상.</p>
+      </section>
+
+      <!-- 병리 판독 -->
+      <section class="page" id="path">
+        <div class="pagehead"><h1>병리 판독</h1><span class="scr">SCR-04</span></div>
+        <div class="patientbar">
+          <span class="mono" style="font-weight:700">SP-2026-0456</span>
+          <span class="nm">홍길동</span><span class="meta">위내시경 조직</span>
+          <span class="pill n">블록 3 · 슬라이드 5</span>
+        </div>
+        <div class="pathgrid">
+          <div class="card pad">
+            <p class="ch">이미지 (PACS 연계)</p>
+            <div class="grid" style="grid-template-columns:1fr 1fr">
+              <div class="imgbox">육안</div>
+              <div class="imgbox">현미경 H&amp;E</div>
+            </div>
+            <div class="row" style="margin-top:12px"><button class="btn">WADO 원본 열기</button><button class="btn">추가염색 오더</button></div>
+          </div>
+          <div class="card pad">
+            <p class="ch">판독 보고서</p>
+            <div class="field"><label>현미경 소견</label><div class="box">위 점막의 만성 염증성 변화, 장상피화생 동반. 이형성 및 악성 소견 없음.</div></div>
+            <div class="field"><label>진단 (SNOMED CT)</label><div class="box">만성 위염 (Chronic gastritis) · K29.5</div></div>
+            <div class="row"><button class="btn">임시저장</button><span class="spacer" style="flex:1"></span><button class="btn primary">전자서명 · 확정 → HIS 전송</button></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 유전체 변이 -->
+      <section class="page" id="genomic">
+        <div class="pagehead"><h1>유전체 변이 큐레이션</h1><span class="scr">SCR-11</span></div>
+        <div class="patientbar">
+          <span class="mono" style="font-weight:700">G2026-0045</span>
+          <span class="nm">홍길동</span><span class="meta">유전성유방암패널</span>
+          <span class="pill indigo">생식세포 · 수탁</span>
+        </div>
+        <div class="steps2">
+          <span class="s2 done">동의 ✓</span><span class="s2 done">발송 ✓</span><span class="s2 done">수탁분석 ✓</span><span class="s2 done">결과수신 ✓</span><span class="s2 cur">◆ 해석</span><span class="s2">보고</span>
+        </div>
+        <div class="card">
+          <div class="row pad" style="border-bottom:1px solid var(--line)">
+            <span class="pill n">필터 · 품질 PASS</span><span class="pill n">gnomAD &lt; 1%</span><span class="pill n">패널 유전자</span>
+            <span class="spacer" style="flex:1"></span><button class="btn">VCF 원본</button>
+          </div>
+          <div class="tscroll"><table>
+            <thead><tr><th>유전자</th><th>변이 (HGVS)</th><th>VAF</th><th>분류</th><th>근거</th></tr></thead>
+            <tbody>
+              <tr><td><b>BRCA1</b></td><td class="num">c.68_69delAG (p.Glu23fs)</td><td class="num">45%</td><td><span class="pill crit">Pathogenic</span></td><td class="mono" style="font-size:12px">PVS1, PM2</td></tr>
+              <tr><td><b>BRCA2</b></td><td class="num">c.1234A&gt;G (p.Ile412Val)</td><td class="num">48%</td><td><span class="pill warn">VUS</span></td><td class="mono" style="font-size:12px">PP3</td></tr>
+              <tr><td>TP53</td><td class="num">검출 없음</td><td class="num">–</td><td><span class="pill n">–</span></td><td class="mono" style="font-size:12px">–</td></tr>
+            </tbody>
+          </table></div>
+          <div class="row pad" style="border-top:1px solid var(--line)">
+            <button class="btn">지식베이스 조회</button><button class="btn">VUS 재검토 등록</button>
+            <span class="spacer" style="flex:1"></span>
+            <button class="btn">2인 검토</button><button class="btn indigo">전자서명 · 확정 → EMR</button>
+          </div>
+        </div>
+        <p class="note">Pathogenic 변이는 유전상담 권고 대상. 확정 시 ORU/FHIR로 EMR 전송, 유전정보 접근은 별도 감사로그 기록.</p>
+      </section>
+
+      <!-- placeholder -->
+      <section class="page" id="soon">
+        <div class="placeholder">
+          <div class="big" id="soon-name">준비 중</div>
+          <div>이 화면은 프로토타입 범위에 포함되지 않았습니다.<br>상세는 화면정의서(03) 및 기능상세(07)를 참조하세요.</div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var items = document.querySelectorAll(".navitem");
+    var pages = document.querySelectorAll(".page");
+    function show(t, name) {
+      pages.forEach(function (p) { p.classList.toggle("active", p.id === t); });
+      if (t === "soon" && name) { document.getElementById("soon-name").textContent = name; }
+      var main = document.querySelector("main"); if (main) main.scrollTop = 0;
+    }
+    items.forEach(function (b) {
+      b.addEventListener("click", function () {
+        items.forEach(function (x) { x.setAttribute("aria-current", "false"); });
+        b.setAttribute("aria-current", "true");
+        show(b.getAttribute("data-t"), b.getAttribute("data-n"));
+      });
+    });
+  })();
+</script>

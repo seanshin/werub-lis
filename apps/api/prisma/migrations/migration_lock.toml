@@ -1,0 +1,2 @@
+# Prisma Migrate 잠금 파일 — 마이그레이션 provider 고정.
+provider = "postgresql"
