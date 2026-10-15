@@ -109,7 +109,7 @@ npm run docker:up
 
 # apps/api/.env 최소 구성
 #   DATABASE_URL="postgresql://lis:CHANGE_ME@localhost:5433/lis?schema=public"
-#   JWT_SECRET="CHANGE_ME"
+#   JWT_SECRET="로컬용-32자-이상-임의문자열-000000"
 
 npm run db:migrate     # prisma migrate dev
 npm run db:seed        # 마스터 + 데모 데이터
@@ -325,7 +325,7 @@ LIS/
 # 예시
 TOK=$(curl -s -X POST localhost:4100/api/v1/auth/login \
   -H 'content-type: application/json' \
-  -d '{"userId":"U00","password":"SEED_PASSWORD 로 정한 값"}' | jq -r .accessToken)
+  -d '{"userId":"U00","password":"'"$SEED_PASSWORD"'"}' | jq -r .accessToken)
 
 curl -s localhost:4100/api/v1/integration/hl7/health/monitor \
   -H "authorization: Bearer $TOK" | jq .data

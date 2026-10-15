@@ -10,7 +10,7 @@
 |---|---|
 | 내부 작업 기록 | 다른 시스템과 주고받은 결함 보고 · 회신, 키 교체 런북, 서버 실측 등 112개 문서를 뺐습니다. 소스 주석이 빠진 문서를 가리키는 곳이 남아 있을 수 있습니다 |
 | 운영 정보 | 운영 도메인 · 서버 주소 · 서버 계정을 예시 값(`example.org` · 문서용 IP 대역 · `deploy`)으로 바꿨습니다 |
-| 🔴 비밀값 | 비밀번호 · 비밀 · 토큰 · 키 **5곳**을 `CHANGE_ME` 로 비웠습니다. **실행 전에 아래 값을 직접 정하십시오** |
+| 🔴 비밀값 | 비밀번호 · 비밀 · 토큰 · 키 **3곳**을 `CHANGE_ME` 로 비웠습니다. **실행 전에 아래 값을 직접 정하십시오** |
 
 ## 직접 설정할 값
 
@@ -19,11 +19,11 @@
 | `CRITICAL_WEBHOOK_SECRET` | `infra/docker/.env.production.example`(비어 있음) |
 | `HIS_CLIENT_SECRET` | `infra/docker/.env.production.example`(비어 있음) |
 | `HIS_INTEGRATION_KEY` | `infra/docker/.env.production.example`(비어 있음) |
-| `JWT_SECRET` | `README.md` · `apps/api/.env.example` |
+| `JWT_SECRET` | `apps/api/.env.example` |
 | `NEXT_PUBLIC_DEMO_PASSWORD` | 로그인 화면 데모 패널(`NEXT_PUBLIC_DEMO=1` 빌드에서만) — `SEED_PASSWORD` 와 같은 값 |
 | `PW` | `infra/scripts/his-fhir-smoke.sh` · `reflex-pilot-rehearsal.sh` 실행 시 — 지정하지 않으면 멈춥니다 |
 | `SEED_PASSWORD` | 시드(`apps/api/prisma/seed.ts`) — 지정하지 않으면 무작위로 만들어 로그에 한 번 찍습니다 |
-| 문서 · 예시 속 비밀번호 | `16_개발착수_구현현황.md` · `README.md` · `apps/api/.env.example` — 접속 문자열 · 예시 명령의 비밀번호를 `CHANGE_ME` 로 비웠습니다. 실제 값으로 바꿔 쓰십시오 |
+| 문서 · 예시 속 비밀번호 | `README.md` · `apps/api/.env.example` — 접속 문자열 · 예시 명령의 비밀번호를 `CHANGE_ME` 로 비웠습니다. 실제 값으로 바꿔 쓰십시오 |
 
 - 같은 이름이 여러 곳에 있으면 **모두 같은 값**이어야 하는지(서로 맞물리는 연동 비밀) 확인하십시오.
 - 값은 길고 무작위로 만드십시오(예: `openssl rand -base64 32`). 저장소에 다시 커밋하지 마십시오.
