@@ -110,7 +110,7 @@ ML 서버(`203.0.113.10`)로 복구**됐다. `https://lis.example.org` 정상, *
 
 | | 이전 | 현재 |
 |---|---|---|
-| 호스트·SSH | `deploy@198.51.100.73:819` (일본) | `deploy@203.0.113.10:22` (국내 ML 서버) |
+| 호스트·SSH | `deploy@198.51.100.10:22` (일본) | `deploy@203.0.113.10:22` (국내 ML 서버) |
 | 저장소 경로 | `~/lis` | `~/his-backup/weruby/lis` |
 | 인그레스 | Cloudflare(DNS전용) → **nginx :443**(certbot) | **Cloudflare Tunnel → cloudflared → Caddy :8088** |
 | TLS 종단 | 호스트 certbot | Cloudflare 엣지 (오리진 인증서 없음) |
